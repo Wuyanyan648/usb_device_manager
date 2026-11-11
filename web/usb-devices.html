@@ -256,11 +256,13 @@
   .trow.prot .shape { background: var(--yellow); }
   .trow.prot.st-hub .shape { background: var(--yellow); }
   .trow .protlock { font-size: 11px; color: var(--yellow); }
-  .tnode.dock > .trow { background: color-mix(in srgb, var(--yellow) 7%, transparent); }
+  .tnode.dock-root > .trow { background: color-mix(in srgb, var(--yellow) 7%, transparent); }
   .chip-dock {
     font-size: 10px; padding: 1px 7px; border-radius: 999px; color: var(--yellow);
     border: 1px solid color-mix(in srgb, var(--yellow) 50%, transparent); white-space: nowrap;
+    cursor: help;
   }
+  .dock-summary { cursor: pointer; color: var(--yellow); }
   .tdetail { display: none; margin: 2px 0 10px 30px; padding: 10px 12px; font-size: 12px;
     border: 1px solid var(--border-soft); border-radius: 8px; background: var(--panel-2); }
   .tnode.detail-open > .tdetail { display: block; }
@@ -319,6 +321,7 @@
     <div class="card-head">
       <h2>拓扑与链路</h2>
       <span class="hint">点节点看详情；右侧开关即 USB 通信链路（authorized）</span>
+      <span class="pill dock-summary" id="dockSummary" hidden></span>
       <div class="spacer"></div>
       <div class="seg" id="viewSeg">
         <button data-view="graph" class="on">拓扑图</button>
@@ -684,13 +687,13 @@ function topoNodeHtml(n, showEmpty) {
   const bad = ["no_driver", "unconfigured"].includes(st);
   const sc = isRoot ? "st-root" : !on ? "st-off" : st === "hub" ? "st-hub" : bad ? "st-bad" : "st-ok";
   const prot = !isRoot && (lvl === "critical" || lvl === "protected");
-  const inDock = d.path === DOCK_ROOT || d.path.startsWith(DOCK_ROOT + ".");
+  const inDock = d.path === DOCK_ROOT;
   const protTitle = ((d.protection && d.protection.reasons) || []).join("\n");
   const num = isRoot ? "" : String(d.path).split(/[.-]/).pop();
   const drv = (d.drivers || []).join(", ");
   const speed = d.speed_label || (d.speed ? d.speed + " Mbps" : "");
 
-  return `<div class="tnode${inDock ? " dock" : ""}${closed}" data-path="${esc(d.path)}" data-kind="device">
+  return `<div class="tnode${inDock ? " dock-root" : ""}${closed}" data-path="${esc(d.path)}" data-kind="device">
     <div class="trow ${sc} ${prot ? "prot" : ""}${isRoot ? " root" : ""}"
          title="${esc(protTitle || (d.path + " " + (d.vidpid || "")))}">
       <button class="chev">${hasKids ? "▾" : ""}</button>
@@ -700,7 +703,7 @@ function topoNodeHtml(n, showEmpty) {
         <span class="nm">${esc(d.name)}</span>
         <span class="mono2">${esc(d.vidpid || "")}</span>
         <span class="meta">${esc(speed)}${drv ? " · " + esc(drv) : ""} · ${esc(d.path)}</span>
-        ${d.path === DOCK_ROOT ? '<span class="chip-dock">冷启动时整组可能不出现</span>' : ""}
+        ${inDock ? '<span class="chip-dock" title="扩展坞 3-1 在冷启动时可能整组枚举失败（unable to enumerate USB device）。子设备不单独标注，详见「扩展坞冷启动」卡片">⚠ 冷启动风险</span>' : ""}
       </span>
       ${prot ? `<span class="protlock" title="${esc(protTitle)}">受保护</span>` : ""}
       ${statusBadge(d.status || { code: "ok", label: "正常" })}
@@ -771,6 +774,19 @@ function renderTopo() {
   if (!g) return;
   const showEmpty = $("#showEmpty").checked;
   g.innerHTML = buildForest().map(n => topoNodeHtml(n, showEmpty)).join("");
+  const dockCount = (STATE.rows || []).filter(r => r.kind === "device" && r.path === DOCK_ROOT).length;
+  const summary = $("#dockSummary");
+  if (summary) {
+    summary.hidden = !dockCount;
+    if (dockCount) {
+      summary.textContent = `${dockCount} 个 hub 有冷启动风险`;
+      summary.title = "扩展坞 3-1：开机时 hub 本体可能枚举失败（unable to enumerate USB device）。点此查看「扩展坞冷启动」卡片";
+      summary.onclick = () => {
+        const card = $("#dockCard");
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+    }
+  }
   if (TOPO.open) {
     const tn = g.querySelector(`.tnode[data-path="${TOPO.open}"]`);
     if (tn) {
