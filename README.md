@@ -57,20 +57,30 @@
 ```bash
 cd local_service/usb_device_manager
 
-# 安装（必须 root：authorized 只有 root 可写）
-sudo ./install-autostart.sh
+# 安装（必须 root：authorized 只有 root 可写；pkexec 会弹桌面认证框）
+pkexec ./install-autostart.sh
+# 或 sudo ./install-autostart.sh
 
 # 只在前台跑（非 root 只能查看）
 ./start.sh
 ```
 
-`install-autostart.sh` 会做四件事：
+`install-autostart.sh` 会做六件事：
 
 1. 把 `systemd/usbdevd.service` 里的 `@DIR@` 换成仓库路径，装到 `/etc/systemd/system/`；
-2. 把 `systemd/49-usbdevd.rules` 的 `@USER@` 换成当前 sudo 用户，装到
+2. 装 drop-in `/etc/systemd/system/usbdevd.service.d/10-user-session.conf`
+   （`PartOf=user@<UID>.service`）：注销时随会话停止，与 `usbnicd` 的 `10-screen-session.conf` 同一策略；
+3. 把 `systemd/49-usbdevd.rules` 的 `@USER@` 换成目标用户，装到
    `/etc/polkit-1/rules.d/`，让门户能免密 start/stop 这一个单元（与 `49-screen-usbnicd.rules` 同思路）；
-3. 建 `/var/lib/usbdevd`（操作历史、启动快照）与 `/etc/usbdevd`（配置）；
-4. `daemon-reload` + `enable` + `restart`，并打印地址与日志命令。
+4. 装用户单元 `~/.config/systemd/user/usbdevd-session.service` 并 `enable`：
+   下次登录时把系统级 `usbdevd` 重新拉起（`PartOf` 只传播 stop，不传播 start）；
+5. 建 `/var/lib/usbdevd`（操作历史、启动快照）与 `/etc/usbdevd`（配置）；
+6. `daemon-reload` + `enable` + `restart`，并打印地址与日志命令。
+
+> 会话策略：`Linger=no` 时 `user@<UID>.service` 在最后一个会话结束时停止，`PartOf` 会把 stop
+> 传播给 `usbdevd`，所以它不会在无人登录时继续常驻；下次登录由 `usbdevd-session.service` 拉回。
+> 若把该用户设为 `loginctl enable-linger`，`user@` 不会停，本条也就不生效（与 `usbnicd` 行为一致）。
+
 
 卸载：
 
@@ -87,7 +97,7 @@ backend/usbdev_core.py     纯逻辑：sysfs 扫描、拓扑、端点带宽、�
                            authorized 写入、历史与快照持久化。可单独当 CLI 用。
 backend/usbdev_server.py   HTTP 服务（127.0.0.1:8795）、udev 实时监听、CLI 参数。
 web/usb-devices.html       单文件前端（深色/浅色跟随系统，无外部依赖）。
-systemd/                   系统单元 + polkit 规则模板。
+systemd/                   系统单元 + 注销即停 drop-in + 登录拉起单元 + polkit 规则模板。
 scripts 即仓库根目录的 start.sh / run-service.sh / install-autostart.sh / uninstall-autostart.sh。
 ```
 
@@ -314,7 +324,8 @@ hub 3-1:1.0: 4 ports detected
 sudo ./uninstall-autostart.sh
 ```
 
-- 停止并 disable `usbdevd.service`，删除单元与 polkit 规则；
+- 停止并 disable `usbdevd.service`，删除单元、drop-in 目录、polkit 规则与用户单元
+  `usbdevd-session.service`；
 - 不动 `screen` / `theme_manager` / `usb_wireless_network` 的任何文件；
 - `/var/lib/usbdevd/` 保留（历史记录与快照），需要时手动删；
 - 若曾打开 `allow_port_replug`，回滚前把 `/etc/usbdevd/config.json` 改回 `false` 即可，

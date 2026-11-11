@@ -1,0 +1,16 @@
+[Unit]
+# 登录后把系统级 usbdevd 拉起来（模板：@DIR@ 由 install-autostart.sh 替换）。
+# 与 screen 的 usbnic-session.service 同一套做法：系统级 unit 随会话停止，
+# 由这个用户单元在下次登录时把它 start 回来。start 需要 polkit 规则放行。
+Description=登录后拉起 usbdevd（8795，系统级）
+After=default.target
+# 门户每次登录都会起，这个桥失败不影响登录
+ConditionPathExists=@DIR@/backend/usbdev_server.py
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=-/usr/bin/systemctl start usbdevd.service
+
+[Install]
+WantedBy=default.target
