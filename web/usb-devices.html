@@ -201,6 +201,7 @@
     <div class="brand"><span class="dot" id="dot"></span>USB 设备管理 <small id="authNote">…</small></div>
     <span class="pill" id="kernelPill">内核 –</span>
     <span class="pill" id="asPill">autosuspend –</span>
+    <span class="pill" id="guardPill">开机守卫 –</span>
     <div class="spacer"></div>
     <label class="pill" style="cursor:pointer">
       <input type="checkbox" id="showEmpty"> 显示空端口
@@ -370,6 +371,14 @@ function render() {
   const h = s.host || {};
   $("#kernelPill").textContent = "内核 " + (h.kernel || "–");
   $("#asPill").textContent = "usbcore.autosuspend=" + (h.usbcore_autosuspend || "?");
+  const bg = s.boot_guard || {};
+  const bgText = !bg.current_boot ? "本次开机未检查"
+    : ({ ok: "坞正常", fixed: "已自动修复", failed: "自动重连失败",
+         skipped: "未触发", disabled: "已关闭", would_replug: "演练",
+         unknown: "未检查" }[bg.result] || bg.result);
+  $("#guardPill").textContent = "开机守卫 " + (bg.enabled === false ? "关 · " : "开 · ") + bgText;
+  $("#guardPill").style.color = bg.result === "failed" ? "var(--red)"
+    : (bg.result === "fixed" ? "var(--yellow)" : "");
   $("#authNote").textContent = s.capabilities.root ? "root 运行，可开关链路" : "只读：非 root";
 
   const c = s.counts || {};
