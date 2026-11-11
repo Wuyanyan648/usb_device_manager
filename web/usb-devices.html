@@ -193,6 +193,89 @@
     .tbl th:nth-child(4), .tbl td:nth-child(4) { display: none; }
     .dev-name .n { max-width: 180px; }
   }
+
+  /* ---- 拓扑图 ---- */
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .seg button {
+    background: transparent; border: 0; color: var(--muted); padding: 5px 13px;
+    font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .seg button.on { background: var(--panel-2); color: var(--text); }
+  .legend {
+    display: flex; gap: 14px; flex-wrap: wrap; padding: 10px 18px 2px;
+    font-size: 11px; color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 50%; background: var(--green); display: inline-block; }
+  .legend i.sq { border-radius: 3px; background: var(--cyan); width: 12px; height: 10px; }
+  .legend i.ring { background: transparent; box-shadow: inset 0 0 0 2px var(--faint); }
+  .legend i.amber { background: var(--yellow); }
+  .legend i.red { background: var(--red); }
+  .tree-graph { padding: 6px 18px 18px; }
+  .tnode { position: relative; }
+  .tchildren { margin-left: 18px; padding-left: 16px; border-left: 1px dashed var(--border-soft); }
+  .tchildren > .tnode > .trow::before {
+    content: ""; position: absolute; left: -16px; top: 20px; width: 14px;
+    border-top: 1px dashed var(--border-soft);
+  }
+  .trow {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px; margin: 2px 0; border: 1px solid transparent;
+    border-left: 3px solid transparent; border-radius: 7px; cursor: pointer;
+    font-size: 13px; min-height: 34px;
+  }
+  .trow:hover { background: var(--panel); }
+  .trow .chev {
+    width: 15px; flex: none; background: none; border: 0; cursor: pointer;
+    color: var(--faint); font-size: 11px; padding: 0; transition: transform .15s;
+  }
+  .tnode.closed > .trow .chev { transform: rotate(-90deg); }
+  .tnode.closed > .tchildren, .tnode.closed > .tdetail { display: none; }
+  .shape { width: 11px; height: 11px; flex: none; border-radius: 50%; background: var(--green); }
+  .trow .pnum {
+    flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--muted); font-family: ui-monospace, monospace;
+  }
+  .trow .grow { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .trow .nm { font-weight: 600; }
+  .trow .meta { font-size: 11px; color: var(--muted); }
+  .trow .mono2 { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+  .trow.st-root { background: var(--panel-2); border-color: var(--border); }
+  .trow.st-root .shape { border-radius: 2px; width: 13px; height: 11px; background: var(--accent); }
+  .trow.st-hub { border-color: var(--border-soft); }
+  .trow.st-hub .shape { border-radius: 3px; width: 12px; height: 10px; background: var(--cyan); }
+  .trow.st-off { border-style: dashed; opacity: .78; }
+  .trow.st-off .shape { background: transparent; box-shadow: inset 0 0 0 2px var(--faint); }
+  .trow.st-bad { border-color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }
+  .trow.st-bad .shape { background: var(--red); }
+  .trow.port-row-node { color: var(--muted); font-size: 12px; min-height: 28px; cursor: pointer; }
+  .trow.port-row-node .shape { width: 9px; height: 9px; border-radius: 2px; background: transparent; box-shadow: inset 0 0 0 2px var(--border); }
+  .trow.port-row-node.used .shape { box-shadow: inset 0 0 0 2px var(--green); }
+  .trow.port-row-node.bad .shape { box-shadow: inset 0 0 0 2px var(--red); }
+  .trow.prot { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow) 55%, transparent); }
+  .trow.prot .shape { background: var(--yellow); }
+  .trow.prot.st-hub .shape { background: var(--yellow); }
+  .trow .protlock { font-size: 11px; color: var(--yellow); }
+  .tnode.dock > .trow { background: color-mix(in srgb, var(--yellow) 7%, transparent); }
+  .chip-dock {
+    font-size: 10px; padding: 1px 7px; border-radius: 999px; color: var(--yellow);
+    border: 1px solid color-mix(in srgb, var(--yellow) 50%, transparent); white-space: nowrap;
+  }
+  .tdetail { display: none; margin: 2px 0 10px 30px; padding: 10px 12px; font-size: 12px;
+    border: 1px solid var(--border-soft); border-radius: 8px; background: var(--panel-2); }
+  .tnode.detail-open > .tdetail { display: block; }
+  .tdetail h4 { margin: 10px 0 5px; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .3px; }
+  .tdetail h4:first-child { margin-top: 0; }
+  .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 3px 16px; }
+  .kv div { display: flex; gap: 6px; min-width: 0; }
+  .kv b { color: var(--muted); font-weight: 500; flex: none; }
+  .kv span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .iface { border-left: 1px solid var(--border-soft); padding: 3px 0 3px 10px; margin: 4px 0; }
+  .ep { color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+  @media (max-width: 900px) {
+    .trow .meta { display: none; }
+    .tdetail { margin-left: 6px; }
+  }
 </style>
 </head>
 <body>
@@ -235,17 +318,35 @@
   <section class="card">
     <div class="card-head">
       <h2>拓扑与链路</h2>
-      <span class="hint">按 hub / 端口树展示；右侧开关即 USB 通信链路（authorized）</span>
+      <span class="hint">点节点看详情；右侧开关即 USB 通信链路（authorized）</span>
+      <div class="spacer"></div>
+      <div class="seg" id="viewSeg">
+        <button data-view="graph" class="on">拓扑图</button>
+        <button data-view="table">详细列表</button>
+      </div>
+      <button class="btn" id="expandAll" title="展开所有节点">展开</button>
+      <button class="btn" id="collapseAll" title="折叠到控制器一层">折叠</button>
     </div>
     <div class="card-body flush">
-      <div style="overflow:auto">
-        <table class="tbl">
-          <thead><tr>
-            <th style="min-width:320px">设备 / 端口</th><th>状态</th><th>VID:PID</th>
-            <th>速度</th><th>驱动</th><th>电源</th><th style="text-align:right">链路</th>
-          </tr></thead>
-          <tbody id="treeBody"></tbody>
-        </table>
+      <div class="legend">
+        <span><i></i>正常设备</span>
+        <span><i class="sq"></i>Hub（容器）</span>
+        <span><i class="ring"></i>链路已关闭 authorized=0</span>
+        <span><i class="amber"></i>受保护（网卡/HID/存储/含关键下游）</span>
+        <span><i class="red"></i>枚举失败 / 未配置 / 无驱动</span>
+        <span><i style="border-radius:2px;background:var(--accent)"></i>控制器根 Hub</span>
+      </div>
+      <div id="treeGraph" class="tree-graph"></div>
+      <div id="treeTable" style="display:none">
+        <div style="overflow:auto">
+          <table class="tbl">
+            <thead><tr>
+              <th style="min-width:320px">设备 / 端口</th><th>状态</th><th>VID:PID</th>
+              <th>速度</th><th>驱动</th><th>电源</th><th style="text-align:right">链路</th>
+            </tr></thead>
+            <tbody id="treeBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </section>
@@ -393,6 +494,7 @@ function render() {
 
   renderDock();
   renderIssues();
+  renderTopo();     // 图先渲染，renderTree 末尾统一给两边的链路开关绑事件
   renderTree();
   renderBuses();
   renderHistory();
@@ -523,6 +625,173 @@ function renderTree() {
   });
 }
 
+// ---------- 拓扑图 ----------
+const TOPO = { collapsed: new Set(), open: null, view: "graph" };
+const DOCK_ROOT = "3-1";   // 扩展坞 USB2 侧：冷启动时这一组可能整组不出现
+
+function buildForest() {
+  const byPath = new Map();
+  const portOwner = new Map();   // "hub|设备路径" → 端口节点，保证设备挂在真正的端口下
+  (STATE.rows || []).forEach(r => {
+    const node = { row: r, children: [] };
+    byPath.set(r.path, node);
+    if (r.kind === "port" && r.port.device) portOwner.set(r.port.hub + "|" + r.port.device, node);
+  });
+  const roots = [];
+  byPath.forEach(n => {
+    const r = n.row;
+    const parentPath = r.kind === "port"
+      ? (r.port.hub || "")
+      : ((r.device && r.device.parent) || "");
+    const p = (r.kind !== "port" && portOwner.get(parentPath + "|" + r.path))
+      || (parentPath ? byPath.get(parentPath) : null);
+    if (p && p !== n) p.children.push(n); else roots.push(n);
+  });
+  return roots;
+}
+
+function topoNodeHtml(n, showEmpty) {
+  const r = n.row;
+  const hasKids = n.children.some(c => c.row.kind !== "port" || !c.row.port.empty || showEmpty);
+  const kids = hasKids
+    ? `<div class="tchildren">${n.children.map(c => topoNodeHtml(c, showEmpty)).join("")}</div>` : "";
+  const closed = hasKids && TOPO.collapsed.has(r.path) ? " closed" : "";
+
+  if (r.kind === "port") {
+    const p = r.port;
+    if (p.empty && !showEmpty) return "";
+    const bad = !p.empty && ["error", "disabled"].includes(p.state);
+    return `<div class="tnode" data-path="${esc(p.path)}" data-kind="port">
+      <div class="trow port-row-node ${p.empty ? "" : "used"} ${bad ? "bad" : ""}" title="${esc(p.path)}">
+        <button class="chev">${hasKids ? "▾" : ""}</button>
+        <span class="shape"></span>
+        <span class="pnum">P${p.port}</span>
+        <span class="grow">
+          <span class="nm">${p.empty ? "空端口" : esc(p.device)}</span>
+          <span class="meta">${esc(p.state)}${p.connect_type ? " · " + esc(p.connect_type) : ""}${p.over_current_count ? " · over-current" : ""}${p.disable ? " · disable=" + esc(p.disable) : ""}</span>
+        </span>
+      </div>
+      ${kids}
+      <div class="tdetail"></div>
+    </div>`;
+  }
+
+  const d = r.device;
+  const isRoot = d.kind === "root";
+  const st = (d.status && d.status.code) || "ok";
+  const on = d.authorized !== 0;
+  const lvl = (d.protection && d.protection.level) || "free";
+  const bad = ["no_driver", "unconfigured"].includes(st);
+  const sc = isRoot ? "st-root" : !on ? "st-off" : st === "hub" ? "st-hub" : bad ? "st-bad" : "st-ok";
+  const prot = !isRoot && (lvl === "critical" || lvl === "protected");
+  const inDock = d.path === DOCK_ROOT || d.path.startsWith(DOCK_ROOT + ".");
+  const protTitle = ((d.protection && d.protection.reasons) || []).join("\n");
+  const num = isRoot ? "" : String(d.path).split(/[.-]/).pop();
+  const drv = (d.drivers || []).join(", ");
+  const speed = d.speed_label || (d.speed ? d.speed + " Mbps" : "");
+
+  return `<div class="tnode${inDock ? " dock" : ""}${closed}" data-path="${esc(d.path)}" data-kind="device">
+    <div class="trow ${sc} ${prot ? "prot" : ""}${isRoot ? " root" : ""}"
+         title="${esc(protTitle || (d.path + " " + (d.vidpid || "")))}">
+      <button class="chev">${hasKids ? "▾" : ""}</button>
+      <span class="shape"></span>
+      ${isRoot ? "" : `<span class="pnum">P${esc(num)}</span>`}
+      <span class="grow">
+        <span class="nm">${esc(d.name)}</span>
+        <span class="mono2">${esc(d.vidpid || "")}</span>
+        <span class="meta">${esc(speed)}${drv ? " · " + esc(drv) : ""} · ${esc(d.path)}</span>
+        ${d.path === DOCK_ROOT ? '<span class="chip-dock">冷启动时整组可能不出现</span>' : ""}
+      </span>
+      ${prot ? `<span class="protlock" title="${esc(protTitle)}">受保护</span>` : ""}
+      ${statusBadge(d.status || { code: "ok", label: "正常" })}
+      ${isRoot ? "" : `<button class="sw ${on ? "on" : ""}" data-toggle="${esc(d.path)}" data-on="${on ? 1 : 0}"
+        ${STATE.capabilities.can_toggle ? "" : "disabled"}
+        title="${on ? "关闭通信链路（authorized=0）" : "打开通信链路（authorized=1，重新枚举）"}"><i></i></button>`}
+    </div>
+    ${kids}
+    <div class="tdetail"></div>
+  </div>`;
+}
+
+function topoKv(pairs) {
+  const rows = pairs.filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `<div><b>${esc(k)}</b><span title="${esc(v)}">${esc(v)}</span></div>`).join("");
+  return `<div class="kv">${rows}</div>`;
+}
+
+function topoDetailHtml(path) {
+  const row = (STATE.rows || []).find(r => r.path === path);
+  if (!row) return '<div class="small">这个节点已经不在当前拓扑里了</div>';
+
+  if (row.kind === "port") {
+    const p = row.port;
+    return `<h4>端口</h4>${topoKv([
+      ["端口", p.path], ["所属 hub", p.hub], ["state", p.state],
+      ["connect_type", p.connect_type], ["disable", p.disable],
+      ["over_current_count", p.over_current_count], ["location", p.location],
+      ["physical_location", p.physical_location], ["peer", p.peer],
+      ["waiting_for_supplier", p.waiting_for_supplier],
+      ["当前设备", p.device || "（空）"],
+    ])}`;
+  }
+
+  const d = row.device;
+  const selfPowered = d.bmAttributes ? (parseInt(d.bmAttributes, 16) & 0x40) !== 0 : null;
+  const ifaces = (d.interfaces || []).map(i => `<div class="iface">
+      <div><b>${esc(i.name)}</b> · ${esc(i.class_name || ("class " + i.class))}${i.driver ? " · " + esc(i.driver) : " · 无驱动"}</div>
+      ${(i.endpoints || []).map(e => `<div class="ep">0x${esc(e.addr)} ${esc(e.dir)} · ${esc(e.type)} ·
+        ${esc(e.wMaxPacketSize)}B / ${esc(e.interval_ms ?? "-")}ms${e.bandwidth_bps ? " · " + fmtBps(e.bandwidth_bps) : ""}</div>`).join("")}
+    </div>`).join("") || '<div class="small">没有接口记录（hub 或未绑定驱动）</div>';
+
+  const hist = ((STATE.history || {}).entries || []).filter(e => e.path === path).slice(-6).reverse();
+  const histHtml = hist.length ? hist.map(e => `<div class="ep">${esc(shortTs(e.ts))} ·
+      ${e.ok ? "成功" : "失败"} · ${esc(e.action)} · ${esc(e.detail || "")} · by ${esc(e.actor || "-")}</div>`).join("")
+    : '<div class="small">没有针对这个设备的操作记录</div>';
+
+  return `<h4>身份</h4>${topoKv([
+      ["路径", d.path], ["VID:PID", d.vidpid], ["厂商", d.vendor_name], ["产品", d.product || d.product_name],
+      ["序列号", d.serial], ["制造商", d.manufacturer], ["USB 版本", d.usb_version],
+      ["设备类", d.bDeviceClass], ["bcdDevice", d.bcdDevice], ["配置值", d.bConfigurationValue],
+      ["接口数", d.bNumInterfaces],
+    ])}
+    <h4>供电与电源管理</h4>${topoKv([
+      ["bMaxPower", d.bMaxPower],
+      ["bmAttributes", d.bmAttributes ? d.bmAttributes + (selfPowered ? "（自供电）" : "（总线供电）") : ""],
+      ["power/control", d.power_control], ["runtime_status", d.runtime_status],
+      ["autosuspend_delay", d.autosuspend_delay_ms != null ? d.autosuspend_delay_ms + " ms" : ""],
+      ["wakeup", d.wakeup], ["urbnum", d.urbnum], ["removable", d.removable],
+      ["authorized", d.authorized], ["端点带宽估算", fmtBps(d.bandwidth_bps)],
+    ])}
+    <h4>接口与端点</h4>${ifaces}
+    <h4>操作历史</h4>${histHtml}`;
+}
+
+function renderTopo() {
+  const g = $("#treeGraph");
+  if (!g) return;
+  const showEmpty = $("#showEmpty").checked;
+  g.innerHTML = buildForest().map(n => topoNodeHtml(n, showEmpty)).join("");
+  if (TOPO.open) {
+    const tn = g.querySelector(`.tnode[data-path="${TOPO.open}"]`);
+    if (tn) {
+      tn.classList.add("detail-open");
+      const dt = tn.querySelector(":scope > .tdetail");
+      if (dt) dt.innerHTML = topoDetailHtml(TOPO.open);
+    } else {
+      TOPO.open = null;
+    }
+  }
+}
+
+function setTopoView(v) {
+  TOPO.view = v;
+  document.querySelectorAll("#viewSeg button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
+  $("#treeGraph").style.display = v === "graph" ? "" : "none";
+  $("#treeTable").style.display = v === "table" ? "" : "none";
+  $("#expandAll").style.display = $("#collapseAll").style.display = v === "graph" ? "" : "none";
+  try { localStorage.setItem("usbdev.view", v); } catch (e) {}
+}
+
 function renderBuses() {
   $("#busGrid").innerHTML = (STATE.buses || []).map(b => {
     const pct = Math.min(100, b.periodic_pct || 0);
@@ -640,6 +909,47 @@ function toast(msg, kind) {
 
 $("#refresh").onclick = () => load();
 $("#showEmpty").onchange = () => STATE && render();
+
+// ── 拓扑图交互 ──────────────────────────────────────────────────────────────
+document.querySelectorAll("#viewSeg button").forEach(b => {
+  b.onclick = () => setTopoView(b.dataset.view);
+});
+$("#expandAll").onclick = () => { TOPO.collapsed.clear(); renderTopo(); };
+$("#collapseAll").onclick = () => {
+  (STATE && STATE.rows || []).forEach(r => {
+    if (r.kind !== "port" || !r.port.empty) TOPO.collapsed.add(r.path);
+  });
+  renderTopo();
+};
+$("#treeGraph").addEventListener("click", (e) => {
+  if (e.target.closest("[data-toggle]")) return;   // 链路开关由 renderTree 统一绑定
+  const node = e.target.closest(".tnode");
+  if (!node) return;
+  const path = node.dataset.path;
+
+  if (e.target.closest(".chev")) {
+    if (node.classList.contains("closed")) {
+      TOPO.collapsed.delete(path); node.classList.remove("closed");
+    } else {
+      TOPO.collapsed.add(path); node.classList.add("closed");
+    }
+    return;
+  }
+  if (TOPO.open === path) {
+    TOPO.open = null; node.classList.remove("detail-open"); return;
+  }
+  document.querySelectorAll("#treeGraph .tnode.detail-open")
+    .forEach(n => n.classList.remove("detail-open"));
+  TOPO.open = path;
+  node.classList.add("detail-open");
+  const dt = node.querySelector(":scope > .tdetail");
+  if (dt) dt.innerHTML = topoDetailHtml(path);
+});
+
+let savedView = "graph";
+try { savedView = localStorage.getItem("usbdev.view") || "graph"; } catch (e) {}
+setTopoView(savedView === "table" ? "table" : "graph");
+
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
   TAB = t.dataset.tab;
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
