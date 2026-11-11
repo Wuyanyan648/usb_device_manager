@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USB 设备管理</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #080b11; --bg-soft: #0b0f17; --panel: #111722; --panel-2: #151d2b;
+    --border: #222d40; --border-soft: #1a2332; --text: #e9eef8; --muted: #8e99ad;
+    --faint: #5d687b; --accent: #5b8cff; --accent-2: #8a6cff;
+    --green: #2fd6a3; --yellow: #f5b84b; --red: #ff6b6b; --cyan: #41d1c4;
+    --shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+    --radius: 14px; --radius-sm: 10px;
+    --font: "Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg: #f3f5fa; --bg-soft: #eef1f8; --panel: #ffffff; --panel-2: #f6f8fc;
+      --border: #dfe5f0; --border-soft: #e9edf5; --text: #141a24; --muted: #667085;
+      --faint: #98a2b3; --accent: #3568e8; --accent-2: #6f4be8;
+      --green: #129b74; --yellow: #b7791f; --red: #d64545; --cyan: #159f96;
+      --shadow: 0 10px 30px rgba(20, 30, 60, 0.08);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--font);
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+  .wrap { max-width: 1420px; margin: 0 auto; padding: 20px 22px 60px; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .top-inner {
+    max-width: 1420px; margin: 0 auto; padding: 12px 22px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: .2px; }
+  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); }
+  .brand small { color: var(--muted); font-weight: 400; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 999px; color: var(--muted);
+    background: var(--panel); font-size: 12px;
+  }
+  .spacer { flex: 1; }
+  .btn {
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    padding: 7px 13px; border-radius: 9px; cursor: pointer; font: inherit; font-size: 13px;
+    transition: .15s; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); color: #fff; }
+  .btn.danger { border-color: color-mix(in srgb, var(--red) 60%, var(--border)); color: var(--red); }
+  .btn.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .grid-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 18px 0; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .stat b { display: block; font-size: 24px; font-weight: 650; letter-spacing: .5px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .stat.warn b { color: var(--yellow); }
+  .stat.bad b { color: var(--red); }
+  .stat.good b { color: var(--green); }
+
+  section.card {
+    background: var(--panel); border: 1px solid var(--border-soft);
+    border-radius: var(--radius); margin-bottom: 18px; box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+    border-bottom: 1px solid var(--border-soft); flex-wrap: wrap;
+  }
+  .card-head h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .3px; }
+  .card-head .hint { color: var(--faint); font-size: 12px; }
+  .card-body { padding: 14px 18px; }
+  .card-body.flush { padding: 0; }
+
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 11px; line-height: 18px; border: 1px solid transparent; }
+  .b-ok { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); border-color: color-mix(in srgb, var(--green) 30%, transparent); }
+  .b-warn { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, transparent); border-color: color-mix(in srgb, var(--yellow) 30%, transparent); }
+  .b-bad { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); border-color: color-mix(in srgb, var(--red) 30%, transparent); }
+  .b-info { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .b-mute { color: var(--muted); background: var(--panel-2); border-color: var(--border); }
+
+  /* 拓扑 */
+  .tbl { width: 100%; border-collapse: collapse; }
+  .tbl th {
+    text-align: left; font-weight: 500; color: var(--faint); font-size: 11px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border-soft); white-space: nowrap;
+    position: sticky; top: 0; background: var(--panel); z-index: 2;
+  }
+  .tbl td { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tbody tr:hover { background: var(--panel-2); }
+  .tr-danger td:first-child { box-shadow: inset 3px 0 0 var(--red); }
+  .dev-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .dev-name .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
+  .path { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .port-row td { color: var(--muted); font-size: 12px; background: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
+  .port-row .state { font-family: var(--mono); }
+  .indent { display: inline-block; width: 14px; flex: none; }
+
+  /* 带宽 */
+  .bus-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .bus {
+    border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+    padding: 12px 14px; background: var(--panel-2);
+  }
+  .bus h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+  .bus .meta { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .bar { height: 7px; border-radius: 99px; background: var(--border); overflow: hidden; margin: 6px 0 4px; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--accent)); }
+  .bar i.hi { background: linear-gradient(90deg, var(--yellow), var(--red)); }
+
+  /* 历史 */
+  .tabs { display: flex; gap: 6px; padding: 10px 18px 0; }
+  .tab {
+    padding: 6px 12px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 12px;
+    color: var(--muted); border: 1px solid transparent; border-bottom: none;
+  }
+  .tab.on { color: var(--text); background: var(--panel-2); border-color: var(--border-soft); }
+  .timeline { max-height: 420px; overflow: auto; padding: 6px 18px 16px; }
+  .ev { display: grid; grid-template-columns: 148px 92px 110px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border-soft); font-size: 12px; align-items: baseline; }
+  .ev:last-child { border-bottom: none; }
+  .ev .t { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+  .ev .p { font-family: var(--mono); color: var(--muted); }
+  .ev .d { color: var(--muted); overflow-wrap: anywhere; }
+  .empty { color: var(--faint); padding: 18px; text-align: center; font-size: 13px; }
+
+  /* 说明 */
+  .explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .explain div { border-left: 2px solid var(--border); padding-left: 12px; }
+  .explain h3 { margin: 0 0 6px; font-size: 13px; }
+  .explain p { margin: 0; color: var(--muted); font-size: 12.5px; }
+  kbd { font-family: var(--mono); background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 11px; }
+
+  /* 弹窗 */
+  .mask {
+    position: fixed; inset: 0; background: rgba(4, 7, 12, .62); backdrop-filter: blur(3px);
+    display: none; align-items: center; justify-content: center; z-index: 60; padding: 20px;
+  }
+  .mask.on { display: flex; }
+  .modal {
+    width: min(560px, 100%); background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .modal .mh { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); font-weight: 600; }
+  .modal .mb { padding: 16px 18px; color: var(--muted); font-size: 13px; }
+  .modal .mb strong { color: var(--text); }
+  .modal .mf { padding: 12px 18px 16px; display: flex; gap: 10px; justify-content: flex-end; }
+  .modal input[type=text] {
+    width: 100%; margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-soft); color: var(--text);
+    font-family: var(--mono); font-size: 13px;
+  }
+  .warnbox {
+    margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 12.5px;
+    background: color-mix(in srgb, var(--red) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--red) 32%, transparent); color: var(--red);
+  }
+  .toast {
+    position: fixed; right: 20px; bottom: 20px; z-index: 80; display: flex; flex-direction: column; gap: 8px;
+  }
+  .toast div {
+    padding: 10px 14px; border-radius: 9px; background: var(--panel); border: 1px solid var(--border);
+    box-shadow: var(--shadow); font-size: 13px; max-width: 440px;
+  }
+  .toast .ok { border-color: color-mix(in srgb, var(--green) 40%, var(--border)); }
+  .toast .err { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+  .sw { position: relative; width: 40px; height: 22px; border-radius: 99px; background: var(--border); cursor: pointer; transition: .2s; border: none; padding: 0; }
+  .sw i { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: .2s; }
+  .sw.on { background: var(--green); }
+  .sw.on i { left: 21px; }
+  .sw:disabled { opacity: .35; cursor: not-allowed; }
+  .row-actions { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+  .small { font-size: 11px; color: var(--faint); }
+  @media (max-width: 900px) {
+    .tbl th:nth-child(4), .tbl td:nth-child(4) { display: none; }
+    .dev-name .n { max-width: 180px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand"><span class="dot" id="dot"></span>USB 设备管理 <small id="authNote">…</small></div>
+    <span class="pill" id="kernelPill">内核 –</span>
+    <span class="pill" id="asPill">autosuspend –</span>
+    <div class="spacer"></div>
+    <label class="pill" style="cursor:pointer">
+      <input type="checkbox" id="showEmpty"> 显示空端口
+    </label>
+    <label class="pill" style="cursor:pointer">
+      <input type="checkbox" id="autoRefresh" checked> 自动刷新
+    </label>
+    <button class="btn" id="refresh">刷新</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="grid-cards" id="stats"></div>
+
+  <!-- 扩展坞 -->
+  <section class="card" id="dockCard" style="display:none">
+    <div class="card-head">
+      <h2>扩展坞冷启动</h2>
+      <span class="hint">开机时 hub 本体可能枚举失败（日志里是 <code>unable to enumerate USB device</code>）</span>
+    </div>
+    <div class="card-body" id="dockBody"></div>
+  </section>
+
+  <!-- 待处理 -->
+  <section class="card" id="issueCard" style="display:none">
+    <div class="card-head"><h2>异常与待处理</h2><span class="hint">来自端口状态与内核日志</span></div>
+    <div class="card-body" id="issueBody"></div>
+  </section>
+
+  <!-- 拓扑 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>拓扑与链路</h2>
+      <span class="hint">按 hub / 端口树展示；右侧开关即 USB 通信链路（authorized）</span>
+    </div>
+    <div class="card-body flush">
+      <div style="overflow:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th style="min-width:320px">设备 / 端口</th><th>状态</th><th>VID:PID</th>
+            <th>速度</th><th>驱动</th><th>电源</th><th style="text-align:right">链路</th>
+          </tr></thead>
+          <tbody id="treeBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 带宽 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>总线与带宽</h2>
+      <span class="hint">周期端点按描述符估算，不是内核实际分配值</span>
+    </div>
+    <div class="card-body"><div class="bus-grid" id="busGrid"></div></div>
+  </section>
+
+  <!-- 历史 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>历史记录</h2><span class="hint">谁在什么时候开关了什么、结果如何</span>
+    </div>
+    <div class="tabs">
+      <div class="tab on" data-tab="ops">操作记录</div>
+      <div class="tab" data-tab="kern">内核枚举 / 掉线</div>
+      <div class="tab" data-tab="udev">udev 实时</div>
+    </div>
+    <div class="timeline" id="opsList"></div>
+    <div class="timeline" id="kernList" style="display:none"></div>
+    <div class="timeline" id="udevList" style="display:none"></div>
+  </section>
+
+  <!-- 说明 -->
+  <section class="card">
+    <div class="card-head"><h2>这套「链路开关」到底是什么</h2></div>
+    <div class="card-body explain">
+      <div>
+        <h3>link off = 逻辑断开，不是断电</h3>
+        <p>写 <code>authorized=0</code> 后，设备仍插着、端口仍供电、设备仍上电，但内核会解绑它的接口驱动，
+           <code>/dev</code> 节点、netdev、input 设备随之消失。它等价于「系统看不见这个设备」。</p>
+      </div>
+      <div>
+        <h3>link on = 重新走一遍枚举</h3>
+        <p>写 <code>authorized=1</code> 后，内核重新读取描述符、重新设置配置、重新绑定驱动。
+           这正是你想用来替代「拔插一次」的动作 —— 但前提是设备还有 sysfs 节点。</p>
+      </div>
+      <div>
+        <h3>和物理拔插的差别</h3>
+        <p>物理拔插会切断数据线并可能掉 VBUS，设备的固件状态机彻底复位；
+           <code>authorized</code> 只复位 OS 侧，设备固件本身不会被复位。</p>
+      </div>
+      <div>
+        <h3>和 reset / 端口断电的差别</h3>
+        <p>设备 reset（<code>USBDEVFS_RESET</code>）不重读描述符；端口断电会连带整口设备并影响供电。
+           两者本版都未启用，只做只读展示。</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="mask" id="mask">
+  <div class="modal">
+    <div class="mh" id="mTitle">确认</div>
+    <div class="mb" id="mBody"></div>
+    <div class="mf">
+      <button class="btn" id="mCancel">取消</button>
+      <button class="btn danger" id="mOk">确认执行</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtBps = (v) => {
+  if (!v) return "0";
+  if (v >= 1e9) return (v / 1e9).toFixed(2) + " Gbps";
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + " Mbps";
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + " Kbps";
+  return v + " bps";
+};
+const shortTs = (s) => (s || "").replace("T", " ").replace(/([+-]\d{2}:\d{2})$/, "").slice(0, 19);
+
+let STATE = null;
+let TAB = "ops";
+let busy = false;
+
+async function api(path, body) {
+  const opt = body ? {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-USBDev-Client": "usbdev-ui" },
+    body: JSON.stringify(body),
+  } : {};
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+async function load(quiet) {
+  if (busy) return;
+  busy = true;
+  try {
+    STATE = await api("/api/state");
+    render();
+  } catch (e) {
+    toast("读取失败：" + e.message, "err");
+  } finally {
+    busy = false;
+  }
+}
+
+function levelBadge(level) {
+  if (level === "critical") return '<span class="badge b-bad">关键</span>';
+  if (level === "protected") return '<span class="badge b-warn">受保护</span>';
+  if (level === "blocked") return '<span class="badge b-mute">禁止</span>';
+  return "";
+}
+function statusBadge(st) {
+  const map = { ok: "b-ok", hub: "b-info", root: "b-mute", link_off: "b-warn",
+                unconfigured: "b-bad", no_driver: "b-mute" };
+  return `<span class="badge ${map[st.code] || "b-mute"}">${esc(st.label)}</span>`;
+}
+
+function render() {
+  const s = STATE;
+  if (!s || !s.ok) return;
+  const h = s.host || {};
+  $("#kernelPill").textContent = "内核 " + (h.kernel || "–");
+  $("#asPill").textContent = "usbcore.autosuspend=" + (h.usbcore_autosuspend || "?");
+  $("#authNote").textContent = s.capabilities.root ? "root 运行，可开关链路" : "只读：非 root";
+
+  const c = s.counts || {};
+  $("#stats").innerHTML = [
+    ["已枚举设备", c.devices, ""],
+    ["Hub", c.hubs, ""],
+    ["端口占用", `${c.ports_occupied} / ${c.ports_total}`, ""],
+    ["链路已关闭", c.link_off, c.link_off ? "warn" : "good"],
+    ["关键设备", c.critical, "warn"],
+    ["受保护", c.protected, ""],
+  ].map(([k, v, cls]) => `<div class="stat ${cls}"><b>${v ?? 0}</b><span>${k}</span></div>`).join("");
+
+  renderDock();
+  renderIssues();
+  renderTree();
+  renderBuses();
+  renderHistory();
+}
+
+function renderDock() {
+  const d = STATE.dock;
+  if (!d) return;
+  const ports = d.ports || [];
+  const failed = (STATE.journal || []).filter(e => e.kind === "enum_fail");
+  const hasFailure = failed.length > 0;
+  $("#dockCard").style.display = hasFailure || ports.some(p => !p.present) ? "" : "none";
+  const rows = ports.map(p => `
+    <tr>
+      <td><code>${esc(p.key)}</code> <span class="small">${esc(p.label)}</span></td>
+      <td>${p.present ? '<span class="badge b-ok">已连接</span>' : '<span class="badge b-bad">无设备</span>'}</td>
+      <td><span class="mono">${esc(p.state || "-")}</span></td>
+      <td>${p.device ? `<code>${esc(p.device)}</code>` : "—"}</td>
+      <td style="text-align:right">
+        <button class="btn danger" data-replug="${esc(p.key)}"
+          ${d.allow_port_replug && p.writable ? "" : "disabled"}
+          title="${d.allow_port_replug ? "对端口做 disable 1→0，等价拔插" : "需在 config 里启用 allow_port_replug"}">
+          端口重连
+        </button>
+      </td>
+    </tr>`).join("");
+  const hint = d.allow_port_replug
+    ? `<div class="warnbox">端口重连会断开该口下所有设备（含网卡/键鼠/WiFi）。只有在扩展坞没被识别时才用。</div>`
+    : `<div class="small" style="margin-top:8px">端口重连默认关闭。要启用：在 <code>${esc(d.config_path)}</code> 写入
+       <code>{"allow_port_replug": true}</code> 后重启服务。依据：hub 没枚举出来时没有 sysfs 节点，
+       <code>authorized</code> 无对象可写，只能靠端口 disable 触发一次真正的端口复位。</div>`;
+  $("#dockBody").innerHTML = `
+    <div style="overflow:auto"><table class="tbl">
+      <thead><tr><th>端口</th><th>连接</th><th>state</th><th>当前设备</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>${hint}
+    <div class="small" style="margin-top:10px">
+      最近三次启动里共有 <b>${failed.length}</b> 条枚举失败记录${hasFailure ? "，最近一条：" + esc(failed[failed.length - 1].ts) + " " + esc(failed[failed.length - 1].path) : ""}。
+    </div>`;
+  document.querySelectorAll("[data-replug]").forEach(b => b.onclick = () => confirmReplug(b.dataset.replug));
+}
+
+function renderIssues() {
+  const issues = STATE.issues || [];
+  $("#issueCard").style.display = issues.length ? "" : "none";
+  if (!issues.length) return;
+  $("#issueBody").innerHTML = `<div style="overflow:auto"><table class="tbl">
+    <thead><tr><th>端口</th><th>类型</th><th>说明</th><th>最近事件</th></tr></thead><tbody>
+    ${issues.map(i => `<tr>
+      <td><code>${esc(i.port)}</code>${i.device ? ` <span class="path">${esc(i.device)}</span>` : ""}</td>
+      <td>${i.kind === "enum_fail" ? '<span class="badge b-bad">枚举失败</span>' : '<span class="badge b-warn">端口状态异常</span>'}</td>
+      <td>${i.kind === "enum_fail" ? `该设备在启动过程中枚举失败 ${i.count} 次` : `端口无设备但状态为 ${esc(i.state)}`}</td>
+      <td class="small">${i.last ? esc(i.last.ts) + " " + esc(i.last.label) + " " + esc(i.last.detail || "") : "—"}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+function renderTree() {
+  const showEmpty = $("#showEmpty").checked;
+  const rows = STATE.rows || [];
+  $("#treeBody").innerHTML = rows.map(r => {
+    if (r.kind === "port") {
+      const p = r.port;
+      if (p.empty && !showEmpty) return "";
+      const bad = !p.empty && ["error", "disabled"].includes(p.state);
+      return `<tr class="port-row ${bad ? "tr-danger" : ""}">
+        <td><span class="indent" style="width:${r.depth * 14}px"></span>
+          <span class="state">端口 ${p.port}</span>
+          <span class="path">${p.empty ? "空" : "→ " + esc(p.device)}</span></td>
+        <td><span class="mono">${esc(p.state)}</span></td><td colspan="2" class="small">
+          ${esc(p.connect_type)}${p.over_current_count ? " · over-current " + p.over_current_count : ""}</td>
+        <td colspan="2" class="small">disable=${p.disable ?? "-"}</td><td></td>
+      </tr>`;
+    }
+    const d = r.device;
+    const lvl = d.protection ? d.protection.level : "free";
+    const isRoot = d.kind === "root";
+    const on = d.authorized === 1;
+    const protTitle = (d.protection?.reasons || []).join("\n");
+    return `<tr class="${lvl === "critical" ? "tr-danger" : ""}">
+      <td><span class="indent" style="width:${r.depth * 14}px"></span>
+        <span class="dev-name">
+          ${isRoot ? '<span class="badge b-mute">根</span>' : ""}
+          <span class="n" title="${esc(protTitle)}">${esc(d.name)}</span>
+          ${isRoot ? "" : levelBadge(lvl)}
+          <span class="path">${esc(d.path)}</span>
+        </span></td>
+      <td>${statusBadge(d.status)}</td>
+      <td><span class="mono">${esc(d.vidpid || "-")}</span></td>
+      <td class="small">${esc(d.speed_label || (d.speed ? d.speed + "M" : "-"))}</td>
+      <td class="small">${esc((d.drivers || []).join(", ") || "—")}</td>
+      <td class="small">${esc(d.power_control || "-")}${d.runtime_status ? " · " + esc(d.runtime_status) : ""}</td>
+      <td><div class="row-actions">
+        ${isRoot ? '<span class="small">禁止</span>' : `
+        <button class="sw ${on ? "on" : ""}" data-toggle="${esc(d.path)}" data-on="${on ? 1 : 0}"
+          ${STATE.capabilities.can_toggle ? "" : "disabled"}
+          title="${on ? "关闭通信链路（authorized=0）" : "打开通信链路（authorized=1，重新枚举）"}"><i></i></button>`}
+      </div></td>
+    </tr>`;
+  }).join("");
+  document.querySelectorAll("[data-toggle]").forEach(b => {
+    b.onclick = () => confirmToggle(b.dataset.toggle, b.dataset.on === "1");
+  });
+}
+
+function renderBuses() {
+  $("#busGrid").innerHTML = (STATE.buses || []).map(b => {
+    const pct = Math.min(100, b.periodic_pct || 0);
+    return `<div class="bus">
+      <h3>总线 ${b.busnum} · ${esc(b.speed_label || b.speed + "M")}</h3>
+      <div class="meta">设备 ${b.device_count} · 端口上限 ${b.maxchild} · 周期端点 ${b.periodic_endpoints} / bulk ${b.bulk_endpoints}</div>
+      <div class="bar"><i class="${pct > 60 ? "hi" : ""}" style="width:${pct}%"></i></div>
+      <div class="small">周期预留 ≈ ${fmtBps(b.periodic_bps)} / ${fmtBps(b.periodic_capacity_bps)}（${b.periodic_pct}%）</div>
+      <div class="small" style="margin-top:4px">${esc(b.note)}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderHistory() {
+  const ops = (STATE.history && STATE.history.entries) || [];
+  $("#opsList").innerHTML = ops.length ? ops.map(e => `
+    <div class="ev">
+      <span class="t">${esc(shortTs(e.ts))}</span>
+      <span>${e.ok ? '<span class="badge b-ok">成功</span>' : '<span class="badge b-bad">失败</span>'}</span>
+      <span class="p">${esc(e.path)}</span>
+      <span class="d">${esc(e.action)} · ${esc(e.detail || "")}${e.note ? " · " + esc(e.note) : ""} · by ${esc(e.actor || "-")}</span>
+    </div>`).join("") : '<div class="empty">还没有操作记录</div>';
+
+  const kern = STATE.journal || [];
+  $("#kernList").innerHTML = kern.length ? kern.slice().reverse().map(e => `
+    <div class="ev">
+      <span class="t">${esc(shortTs(e.ts))}</span>
+      <span>${esc(e.boot)}</span>
+      <span class="p">${esc(e.path)}</span>
+      <span class="d">${esc(e.label)}${e.detail ? " · " + esc(e.detail) : ""}</span>
+    </div>`).join("") : '<div class="empty">最近两次启动没有枚举相关记录</div>';
+
+  const uv = (STATE.udev && STATE.udev.events) || [];
+  $("#udevList").innerHTML = uv.length ? uv.slice().reverse().map(e => `
+    <div class="ev">
+      <span class="t">${esc(shortTs(e.ts))}</span>
+      <span><span class="badge ${e.action === "remove" ? "b-warn" : "b-ok"}">${esc(e.action || "?")}</span></span>
+      <span class="p">${esc(e.path || "")}</span>
+      <span class="d">${esc(e.devname || e.devpath || "")} ${esc(e.vid ? e.vid + ":" + (e.pid || "") : "")}</span>
+    </div>`).join("") : `<div class="empty">${STATE.udev && STATE.udev.started ? "等待 udev 事件…" : "udev 监听未启动"}</div>`;
+}
+
+// ── 确认 / 操作 ─────────────────────────────────────────────────────────────
+function openModal(title, html, onOk, okText) {
+  $("#mTitle").textContent = title;
+  $("#mBody").innerHTML = html;
+  $("#mOk").textContent = okText || "确认执行";
+  $("#mask").classList.add("on");
+  $("#mOk").onclick = async () => {
+    $("#mask").classList.remove("on");
+    await onOk();
+  };
+  $("#mCancel").onclick = () => $("#mask").classList.remove("on");
+}
+
+function findDev(path) {
+  const row = (STATE.rows || []).find(r => r.kind !== "port" && r.device && r.device.path === path);
+  return row ? row.device : null;
+}
+
+function confirmToggle(path, isOn) {
+  const d = findDev(path) || {};
+  const prot = d.protection || { level: "free", reasons: [] };
+  const enable = !isOn;
+  if (!enable && prot.level === "blocked") { toast("根 hub 禁止操作", "err"); return; }
+  const body = `<div>设备：<strong>${esc(d.name || path)}</strong> <code>${esc(path)}</code> ${esc(d.vidpid || "")}</div>
+    <div style="margin-top:6px">动作：${enable
+      ? "打开通信链路（authorized=1），内核会重新枚举并重绑驱动"
+      : "关闭通信链路（authorized=0），设备仍上电，但会从驱动与 /dev 上消失"}</div>
+    ${prot.reasons.length ? `<div class="warnbox">${prot.reasons.map(esc).join("<br>")}</div>` : ""}
+    ${!enable && prot.level !== "free" ? `<div style="margin-top:10px">受保护设备需要二次确认，请输入设备路径：</div>
+      <input type="text" id="confirmInput" placeholder="${esc(path)}" autocomplete="off">` : ""}`;
+  openModal(enable ? "打开链路" : "关闭链路", body, async () => {
+    const val = ($("#confirmInput") || {}).value || "";
+    await doLink(path, enable, val);
+  }, enable ? "打开链路" : "关闭链路");
+}
+
+async function doLink(path, enable, confirm) {
+  const r = await api("/api/link", { path, enable, confirm, actor: "portal", note: "" });
+  if (r.ok) {
+    toast(`${enable ? "已打开" : "已关闭"} ${path}：${r.detail}`, "ok");
+    load();
+  } else {
+    toast(r.error || "操作失败", "err");
+  }
+}
+
+function confirmReplug(key) {
+  openModal("端口重连（等价拔插）", `
+    <div>端口：<code>${esc(key)}</code></div>
+    <div style="margin-top:6px">动作：对该端口写 <code>disable=1</code>，1 秒后写 <code>0</code>，
+      xHCI 会重新做一次端口复位。</div>
+    <div class="warnbox">这会断开该口下所有设备。如果这些设备正承载网络或输入，会立即中断；
+      仅在扩展坞没被识别（端口下看不到设备）时使用。</div>
+    <div style="margin-top:10px">请输入端口名确认：</div>
+    <input type="text" id="confirmInput" placeholder="${esc(key)}" autocomplete="off">`,
+  async () => {
+    const val = ($("#confirmInput") || {}).value || "";
+    const r = await api("/api/port-replug", { port: key, confirm: val, actor: "portal" });
+    if (r.ok) { toast(r.detail, "ok"); load(); }
+    else toast(r.error || "操作失败", "err");
+  }, "执行重连");
+}
+
+function toast(msg, kind) {
+  const el = document.createElement("div");
+  el.className = kind || "";
+  el.textContent = msg;
+  $("#toast").appendChild(el);
+  setTimeout(() => el.remove(), kind === "err" ? 9000 : 5000);
+}
+
+$("#refresh").onclick = () => load();
+$("#showEmpty").onchange = () => STATE && render();
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  TAB = t.dataset.tab;
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
+  $("#opsList").style.display = TAB === "ops" ? "" : "none";
+  $("#kernList").style.display = TAB === "kern" ? "" : "none";
+  $("#udevList").style.display = TAB === "udev" ? "" : "none";
+});
+setInterval(() => {
+  if ($("#autoRefresh").checked && !$("#mask").classList.contains("on")) load(true);
+}, 8000);
+load();
+</script>
+</body>
+</html>

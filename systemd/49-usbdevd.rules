@@ -1,0 +1,18 @@
+// 安装到 /etc/polkit-1/rules.d/49-usbdevd.rules（需要 sudo）
+//
+// 目的：让本机用户 @USER@ 不输密码就能从门户对 usbdevd.service 做
+// start / stop / restart（门户跑在 systemd 用户单元里，没有交互式提权窗口）。
+// 与 49-screen-usbnicd.rules 同思路：只放开这一个单元，不按 verb 过滤
+// （门户 start 前会先 reset-failed，systemd 对它的 polkit verb 与 start 不同）。
+polkit.addRule(function (action, subject) {
+  if (action.id !== "org.freedesktop.systemd1.manage-units") {
+    return;
+  }
+  if (subject.user !== "@USER@") {
+    return;
+  }
+  if (action.lookup("unit") !== "usbdevd.service") {
+    return;
+  }
+  return polkit.Result.YES;
+});

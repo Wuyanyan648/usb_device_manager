@@ -1,0 +1,29 @@
+[Unit]
+Description=USB 设备管理（127.0.0.1:8795，通信链路开关）
+Documentation=file://@DIR@/README.md
+After=systemd-udevd.service
+Wants=systemd-udevd.service
+
+[Service]
+Type=simple
+WorkingDirectory=@DIR@
+Environment=PORT=8795
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 @DIR@/backend/usbdev_server.py --no-browser
+Restart=on-failure
+RestartSec=2
+# 端口已被占用时 usbdev_server 返回 3：属于「已有实例」，不算失败
+SuccessExitStatus=3
+
+# authorized 只有 root 可写，所以按系统级单元运行（与 usbnicd 一致），
+# 但只监听 127.0.0.1、只写 authorized，其余 sysfs 全部只读。
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
