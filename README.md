@@ -385,6 +385,39 @@ python3 backend/usbdev_server.py --guard-status
 且 `3-1` 不存在 → 会重连 2 次后标记 `failed` 并写 2 条历史；随后创建 `3-1` → 判定 `ok` 且
 不再动端口；`--dry-run` 在不存在的场景下返回 `would_replug` 且 `disable` 文件未被修改。
 
+### 11.7 真机端到端验证记录（2026-11-11）
+
+目的：确认「端口 `disable` 1→0」确实等价一次物理拔插，且不影响网络与其它总线。
+
+**执行方式**：临时把 `/etc/usbdevd/config.json` 的 `allow_port_replug` 置 `true`，
+调用服务自身的 `POST /api/port-replug`（`confirm=usb3-port1`、`actor=e2e-test`），
+跑完立刻恢复 `false`。走的是页面「端口重连」同一条 `core.port_replug` 路径，
+没有另写脚本绕开；只写一次 `disable`，没有循环。
+
+**时间线**（`journalctl -k`，2026-11-11）：
+
+| 时刻 | 事件 |
+| --- | --- |
+| 19:04:49 | `3-1` 与 `3-1.1~3-1.4` 全部 `USB disconnect` |
+| 19:04:51 | `3-1` 重新枚举：`New USB device found 05e3:0610`、`hub 3-1:1.0: 4 ports detected` |
+| 19:04:52~53 | `3-1.1`、`3-1.2`、`3-1.3`、`3-1.4` 依次回来，`usbhid` / `hub` / `rtw88_8821cu` 重新绑定 |
+| 服务侧 | `elapsed_ms=2060`、`reappeared=true`、`steps=["disable=1","disable=0"]` |
+
+**结果**：
+
+- 端口路径完全不变（`3-1.1`…`3-1.4`），只有 `devnum` 递增（6/10/7/11/9 → 12/13/14/15/16）；
+- `/dev/input/by-id` 下 MCHOSE 键盘、Logitech 接收器条目名称不变；
+- WiFi 网卡名仍是 `wlx6c1ff7f46d6d`（原本就是 down），没有变成随机新名字；
+- 网络默认路由始终是 `enp49s0`（`192.168.1.1`），USB 网卡 `enx6c1ff7d02c4a`（`4-2.2`）保持 up，
+  这次动作不经过 `3-1.3`，网络未受影响；
+- 操作历史新增 1 条 `action=port_replug`、`actor=e2e-test`、`ok=true`、`elapsed_ms=2060`；
+- `/var/lib/usbdevd/boot-guard.json` 未被改写（mtime/大小不变，`result=ok`、`attempts=[]`），
+  手动动作不会污染下次开机的自动判定；
+- `allow_port_replug` 已恢复 `false`。
+
+**副作用**：坞下游键盘/罗技接收器/WiFi 中断约 2~4 秒（用户已确认接受），
+无设备改名、无驱动丢失、无路由变化；`usb3` 上的内置键盘/蓝牙与 `usb4` 的网卡全程正常。
+
 ---
 
 ## 12. 回滚
