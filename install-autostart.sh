@@ -39,7 +39,7 @@ chmod 644 /etc/systemd/system/usbdevd.service
 
 # drop-in：注销（user@UID 停止）时跟着停，与 usbnicd 的策略一致
 install -d -m 0755 /etc/systemd/system/usbdevd.service.d
-sed "s|@UID@|$ACTOR_UID|g" "$DIR/systemd/usbdevd.service.d/10-user-session.conf" \
+sed "s|%UID%|$ACTOR_UID|g" "$DIR/systemd/usbdevd.service.d/10-user-session.conf" \
   > /etc/systemd/system/usbdevd.service.d/10-user-session.conf
 chmod 644 /etc/systemd/system/usbdevd.service.d/10-user-session.conf
 
