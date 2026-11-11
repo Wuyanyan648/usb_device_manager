@@ -18,6 +18,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -504,7 +505,118 @@ def _rows(devices, path, depth, ports_map, out):
         _rows(devices, child, depth + 1, ports_map, out)
 
 
-def bus_summary(devices):
+# ── 实测吞吐：从 netdev / 块设备字节计数反查所属 USB 总线 ───────────────────
+# 只读 /sys，采样间隔 ≥1s，避免频繁读文件；映射不到的设备不产生数据（而不是填 0）。
+_THR_LOCK = threading.Lock()
+_THR = {"ts": 0.0, "prev": None, "buses": {}, "devices": {}}
+USB_DEV_PATH_RE = re.compile(r"^\d+-\d+(?:\.\d+)*$")
+
+
+def _read_int_file(path, default=0):
+    try:
+        with open(path) as fh:
+            return int(fh.read().strip() or 0)
+    except (OSError, ValueError):
+        return default
+
+
+def _usb_owner(link):
+    """从 /sys/class/net/<if>/device 或 /sys/block/<dev>/device 反查 (busnum, usb路径)。"""
+    try:
+        real = os.path.realpath(link)
+    except OSError:
+        return None
+    bus = None
+    for seg in real.split(os.sep):
+        m = re.fullmatch(r"usb(\d+)", seg)
+        if m:
+            bus = int(m.group(1))
+            continue
+        if bus is not None and USB_DEV_PATH_RE.match(seg):
+            return bus, seg
+    return None
+
+
+def _collect_meters():
+    """采集所有 USB 网卡 / USB 块设备的累计字节数。"""
+    meters = {}
+    try:
+        nets = os.listdir("/sys/class/net")
+    except OSError:
+        nets = []
+    for name in nets:
+        base = "/sys/class/net/%s" % name
+        if not os.path.exists(os.path.join(base, "device")):
+            continue                     # lo、veth、网桥等没有 device 链接
+        owner = _usb_owner(os.path.join(base, "device"))
+        if not owner:
+            continue
+        bus, dev_path = owner
+        meters["net:" + name] = {
+            "bus": bus, "dev": dev_path, "kind": "net", "target": name,
+            "rx": _read_int_file(os.path.join(base, "statistics/rx_bytes")),
+            "tx": _read_int_file(os.path.join(base, "statistics/tx_bytes")),
+        }
+    try:
+        blocks = os.listdir("/sys/block")
+    except OSError:
+        blocks = []
+    for name in blocks:
+        owner = _usb_owner(os.path.join("/sys/block", name, "device"))
+        if not owner:
+            continue
+        bus, dev_path = owner
+        try:
+            with open("/sys/block/%s/stat" % name) as fh:
+                fields = fh.read().split()
+            # 字段 3 = 读扇区数，字段 7 = 写扇区数（512B/扇区）
+            rx = int(fields[2]) * 512
+            tx = int(fields[6]) * 512
+        except (OSError, ValueError, IndexError):
+            continue
+        meters["blk:" + name] = {
+            "bus": bus, "dev": dev_path, "kind": "block", "target": name,
+            "rx": rx, "tx": tx,
+        }
+    return meters
+
+
+def usb_throughput():
+    """返回 {buses: {busnum: {rx_bps, tx_bps, meters}}, devices: {path: {...}}}。"""
+    now = time.time()
+    with _THR_LOCK:
+        if _THR["prev"] is not None and now - _THR["ts"] < 1.0:
+            return {"buses": _THR["buses"], "devices": _THR["devices"], "ts": _THR["ts"]}
+        cur = _collect_meters()
+        prev = _THR["prev"]
+        dt = now - _THR["ts"] if prev else 0.0
+        buses, devices = {}, {}
+        for key, meter in cur.items():
+            old = prev.get(key) if prev else None
+            if old and dt > 0:
+                drx = max(0, meter["rx"] - old["rx"]) * 8.0 / dt
+                dtx = max(0, meter["tx"] - old["tx"]) * 8.0 / dt
+            else:
+                drx = dtx = None            # 首次采样：速率未知，不冒充 0
+            bus = buses.setdefault(meter["bus"], {"rx_bps": None, "tx_bps": None, "meters": 0})
+            dev = devices.setdefault(meter["dev"], {"rx_bps": None, "tx_bps": None, "kinds": []})
+            if drx is not None:
+                bus["rx_bps"] = (bus["rx_bps"] or 0) + drx
+                bus["tx_bps"] = (bus["tx_bps"] or 0) + dtx
+                dev["rx_bps"] = (dev["rx_bps"] or 0) + drx
+                dev["tx_bps"] = (dev["tx_bps"] or 0) + dtx
+            bus["meters"] += 1
+            if meter["kind"] not in dev["kinds"]:
+                dev["kinds"].append(meter["kind"])
+            if "targets" not in dev:
+                dev["targets"] = []
+            dev["targets"].append(meter["target"])
+        _THR.update({"ts": now, "prev": cur, "buses": buses, "devices": devices})
+        return {"buses": buses, "devices": devices, "ts": now}
+
+
+def bus_summary(devices, throughput=None):
+    throughput = throughput or usb_throughput()
     buses = {}
     for dev in devices.values():
         if dev["kind"] == "root":
@@ -547,9 +659,17 @@ def bus_summary(devices):
         info["link_bps"] = int(link_bps)
         info["periodic_capacity_bps"] = int(cap)
         info["periodic_pct"] = round(info["periodic_bps"] * 100.0 / cap, 2) if cap else 0
-        info["note"] = ("周期端点按描述符估算，非内核实际分配；"
+        info["note"] = ("周期端点预留按描述符估算，非内核实际分配；"
                         "bulk 端点不预留带宽" if link_bps <= 480e6 else
-                        "USB3 无周期预算概念，数值仅为端点描述符上限")
+                        "USB3 无周期预算概念，此处数值仅为端点描述符上限")
+        measured = throughput["buses"].get(info["busnum"])
+        info["measured"] = bool(measured)
+        if measured:
+            info["rx_bps"] = measured["rx_bps"]
+            info["tx_bps"] = measured["tx_bps"]
+            info["meters"] = measured["meters"]
+            total = (measured["rx_bps"] or 0) + (measured["tx_bps"] or 0)
+            info["measured_pct"] = round(total * 100.0 / link_bps, 3) if link_bps else None
     return [buses[b] for b in sorted(buses)]
 
 
@@ -566,6 +686,12 @@ def snapshot():
         dev["protection"] = prot[dev["path"]]
         dev["status"] = _status(dev, prot[dev["path"]])
 
+    throughput = usb_throughput()
+    for dev in devices.values():
+        meter = throughput["devices"].get(dev["path"])
+        if meter:
+            dev["throughput"] = meter
+
     flat_ports = []
     for path in ports_map:
         for port in ports_map[path]:
@@ -578,7 +704,7 @@ def snapshot():
         "epoch": time.time(),
         "host": host_info(),
         "capabilities": capabilities(devices),
-        "buses": bus_summary(devices),
+        "buses": bus_summary(devices, throughput),
         "rows": rows,
         "ports": flat_ports,
         "protected": [{"path": p, "name": devices[p]["name"],

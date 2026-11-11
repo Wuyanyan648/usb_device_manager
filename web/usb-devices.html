@@ -126,6 +126,12 @@
   .bar { height: 7px; border-radius: 99px; background: var(--border); overflow: hidden; margin: 6px 0 4px; }
   .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--accent)); }
   .bar i.hi { background: linear-gradient(90deg, var(--yellow), var(--red)); }
+  .muted { color: var(--faint); }
+  .thr { display: flex; gap: 10px; align-items: baseline; margin-top: 4px; font-size: 12px;
+    font-variant-numeric: tabular-nums; }
+  .thr .down { color: var(--accent); }
+  .thr .up { color: var(--green); }
+  .dev-thr { display: block; margin-top: 2px; color: var(--cyan); font-variant-numeric: tabular-nums; }
 
   /* 历史 */
   .tabs { display: flex; gap: 6px; padding: 10px 18px 0; }
@@ -358,7 +364,7 @@
   <section class="card">
     <div class="card-head">
       <h2>总线与带宽</h2>
-      <span class="hint">周期端点按描述符估算，不是内核实际分配值</span>
+      <span class="hint">上半部分为周期端点预留（描述符估算），下方实测来自网卡/存储字节计数</span>
     </div>
     <div class="card-body"><div class="bus-grid" id="busGrid"></div></div>
   </section>
@@ -602,6 +608,9 @@ function renderTree() {
     const isRoot = d.kind === "root";
     const on = d.authorized === 1;
     const protTitle = (d.protection?.reasons || []).join("\n");
+    const thr = d.throughput && d.throughput.rx_bps != null
+      ? `<span class="dev-thr">↓ ${fmtBps(d.throughput.rx_bps)} / ↑ ${fmtBps(d.throughput.tx_bps)}</span>`
+      : "";
     return `<tr class="${lvl === "critical" ? "tr-danger" : ""}">
       <td><span class="indent" style="width:${r.depth * 14}px"></span>
         <span class="dev-name">
@@ -612,7 +621,7 @@ function renderTree() {
         </span></td>
       <td>${statusBadge(d.status)}</td>
       <td><span class="mono">${esc(d.vidpid || "-")}</span></td>
-      <td class="small">${esc(d.speed_label || (d.speed ? d.speed + "M" : "-"))}</td>
+      <td class="small">${esc(d.speed_label || (d.speed ? d.speed + "M" : "-"))}${thr}</td>
       <td class="small">${esc((d.drivers || []).join(", ") || "—")}</td>
       <td class="small">${esc(d.power_control || "-")}${d.runtime_status ? " · " + esc(d.runtime_status) : ""}</td>
       <td><div class="row-actions">
@@ -811,11 +820,26 @@ function setTopoView(v) {
 function renderBuses() {
   $("#busGrid").innerHTML = (STATE.buses || []).map(b => {
     const pct = Math.min(100, b.periodic_pct || 0);
+    let measured;
+    if (!b.measured) {
+      measured = `<div class="small muted">实测：该总线下没有可读计数的网卡/存储</div>`;
+    } else if (b.rx_bps == null || b.tx_bps == null) {
+      measured = `<div class="small muted">实测：采样中…</div>`;
+    } else {
+      const share = b.measured_pct == null ? "—" : `${b.measured_pct}%`;
+      measured = `<div class="thr">
+        <span class="down">↓ ${fmtBps(b.rx_bps)}</span>
+        <span class="up">↑ ${fmtBps(b.tx_bps)}</span>
+        <span class="muted">占理论 ${share}</span>
+      </div>`;
+    }
     return `<div class="bus">
       <h3>总线 ${b.busnum} · ${esc(b.speed_label || b.speed + "M")}</h3>
       <div class="meta">设备 ${b.device_count} · 端口上限 ${b.maxchild} · 周期端点 ${b.periodic_endpoints} / bulk ${b.bulk_endpoints}</div>
       <div class="bar"><i class="${pct > 60 ? "hi" : ""}" style="width:${pct}%"></i></div>
-      <div class="small">周期预留 ≈ ${fmtBps(b.periodic_bps)} / ${fmtBps(b.periodic_capacity_bps)}（${b.periodic_pct}%）</div>
+      <div class="small">周期端点预留 ≈ ${fmtBps(b.periodic_bps)} / ${fmtBps(b.periodic_capacity_bps)}（${b.periodic_pct}%）</div>
+      <div class="small">仅 interrupt/isochronous；bulk（网卡/存储）不计入</div>
+      ${measured}
       <div class="small" style="margin-top:4px">${esc(b.note)}</div>
     </div>`;
   }).join("");
