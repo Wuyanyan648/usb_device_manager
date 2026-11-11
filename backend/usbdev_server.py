@@ -312,7 +312,15 @@ def main(argv):
             print("%-12s state=%-12s disable=%s 设备=%s 可写=%s  %s"
                   % (p["key"], p["state"], p["disable"], p["device"] or "（无）",
                      p["writable"], p["label"]))
-        print("端口重连已启用：%s（配置：%s）" % (info["allow_port_replug"], info["config_path"]))
+        print("手动端口重连已启用：%s（配置：%s）" % (info["allow_port_replug"], info["config_path"]))
+        return 0
+    if "--boot-guard" in argv:
+        dry = "--dry-run" in argv
+        res = core.run_boot_guard(dry_run=dry)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0 if res.get("result") not in ("failed",) else 1
+    if "--guard-status" in argv:
+        print(json.dumps(core.read_boot_guard(), ensure_ascii=False, indent=2))
         return 0
     if "--replug-port" in argv:
         i = argv.index("--replug-port")

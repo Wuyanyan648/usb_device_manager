@@ -54,14 +54,24 @@ install -d -m 0755 /etc/usbdevd
 if [ ! -f /etc/usbdevd/config.json ]; then
   cat > /etc/usbdevd/config.json <<'JSON'
 {
+  "auto_replug_on_boot": true,
+  "boot_grace_seconds": 30,
+  "boot_replug_attempts": 2,
+  "boot_settle_seconds": 8,
   "allow_port_replug": false
 }
 JSON
   chmod 644 /etc/usbdevd/config.json
 fi
 
+# 开机自动检查扩展坞（oneshot）：坞没枚举起就对 usb3-port1 做一次 disable 1→0
+sed "s|@DIR@|$DIR|g" "$DIR/systemd/usbdevd-boot-guard.service" \
+  > /etc/systemd/system/usbdevd-boot-guard.service
+chmod 644 /etc/systemd/system/usbdevd-boot-guard.service
+
 systemctl daemon-reload
 systemctl enable usbdevd.service >/dev/null
+systemctl enable usbdevd-boot-guard.service >/dev/null
 
 # 用户级「登录后拉起」桥：系统级 unit 注销即停，靠它在下次登录恢复
 if [ -n "$ACTOR_HOME" ] && [ -d "$ACTOR_HOME" ]; then
@@ -80,6 +90,7 @@ systemctl restart usbdevd.service
 sleep 1
 
 echo "已安装系统单元: /etc/systemd/system/usbdevd.service"
+echo "开机自动重连:  /etc/systemd/system/usbdevd-boot-guard.service（已 enable，默认开启）"
 echo "注销即停:      /etc/systemd/system/usbdevd.service.d/10-user-session.conf（PartOf=user@$ACTOR_UID.service）"
 echo "登录拉起:      $ACTOR_HOME/.config/systemd/user/usbdevd-session.service"
 echo "polkit 规则:    /etc/polkit-1/rules.d/49-usbdevd.rules（放行用户 $ACTOR）"
@@ -93,3 +104,5 @@ echo "卸载:           sudo $DIR/uninstall-autostart.sh"
 echo
 echo "端口重连（扩展坞）默认关闭：要启用把 /etc/usbdevd/config.json 的"
 echo "allow_port_replug 改成 true，然后 systemctl restart usbdevd。"
+echo "开机自动检查默认开启（auto_replug_on_boot=true）；要关掉改成 false 或"
+echo "systemctl disable usbdevd-boot-guard.service。"

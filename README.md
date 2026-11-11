@@ -65,7 +65,7 @@ pkexec ./install-autostart.sh
 ./start.sh
 ```
 
-`install-autostart.sh` 会做六件事：
+`install-autostart.sh` 会做七件事：
 
 1. 把 `systemd/usbdevd.service` 里的 `@DIR@` 换成仓库路径，装到 `/etc/systemd/system/`；
 2. 装 drop-in `/etc/systemd/system/usbdevd.service.d/10-user-session.conf`
@@ -75,7 +75,8 @@ pkexec ./install-autostart.sh
 4. 装用户单元 `~/.config/systemd/user/usbdevd-session.service` 并 `enable`：
    下次登录时把系统级 `usbdevd` 重新拉起（`PartOf` 只传播 stop，不传播 start）；
 5. 建 `/var/lib/usbdevd`（操作历史、启动快照）与 `/etc/usbdevd`（配置）；
-6. `daemon-reload` + `enable` + `restart`，并打印地址与日志命令。
+6. 装并 `enable` `usbdevd-boot-guard.service`（开机自动检查扩展坞，见 11.6）；
+7. `daemon-reload` + `enable` + `restart`，并打印地址与日志命令。
 
 > 会话策略：`Linger=no` 时 `user@<UID>.service` 在最后一个会话结束时停止，`PartOf` 会把 stop
 > 传播给 `usbdevd`，所以它不会在无人登录时继续常驻；下次登录由 `usbdevd-session.service` 拉回。
@@ -97,7 +98,7 @@ backend/usbdev_core.py     纯逻辑：sysfs 扫描、拓扑、端点带宽、�
                            authorized 写入、历史与快照持久化。可单独当 CLI 用。
 backend/usbdev_server.py   HTTP 服务（127.0.0.1:8795）、udev 实时监听、CLI 参数。
 web/usb-devices.html       单文件前端（深色/浅色跟随系统，无外部依赖）。
-systemd/                   系统单元 + 注销即停 drop-in + 登录拉起单元 + polkit 规则模板。
+systemd/                   系统单元 + 注销即停 drop-in + 登录拉起单元 + 开机自动重连 oneshot + polkit 规则模板。
 scripts 即仓库根目录的 start.sh / run-service.sh / install-autostart.sh / uninstall-autostart.sh。
 ```
 
@@ -150,6 +151,8 @@ python3 backend/usbdev_server.py --check         # 权限自检（authorized 是
 python3 backend/usbdev_server.py --state         # 全量 JSON
 python3 backend/usbdev_server.py --link-off 3-8 --yes     # 关闭链路（受保护设备必须 --yes）
 python3 backend/usbdev_server.py --link-on 3-8            # 打开链路
+python3 backend/usbdev_server.py --boot-guard --dry-run  # 开机自动检查的只读演练
+python3 backend/usbdev_server.py --guard-status          # 上次开机自动检查的结论
 ```
 
 ---
@@ -307,7 +310,7 @@ hub 3-1:1.0: 4 ports detected
 
 - `authorized` 0→1 **不能**解决这个场景（失败时没有 sysfs 节点可写）；
 - 解法是端口级重连（8.5），只针对 `usb3-port1` / `usb4-port2`；
-- 该能力默认关闭，需要显式打开配置；打开后必须先确认端口下确实没有设备，避免误断网/输入。
+- 页面上的手动按钮默认关闭（`allow_port_replug=false`）；开机自动检查默认开启，见 11.6。
 
 ### 11.5 需要人工配合的验证
 
@@ -315,6 +318,72 @@ hub 3-1:1.0: 4 ports detected
    `allow_port_replug` 并点一次「端口重连」，看是否等效拔插；
 2. 进 BIOS 检查：`XHCI Hand-off`（建议 Enabled）、`Legacy USB Support`（Enabled/Auto）、
    `Fast Boot`（建议关闭）、`USB power in S5/S4`（建议关闭）。
+
+### 11.6 开机自动重连（已实现，默认开启）
+
+目标：开机后坞又没枚举时，自动做一次「软件拔插」，不用人去碰硬件。
+
+**触发方式用 systemd oneshot，不用 udev 规则。** 理由是这里的故障形态本身就否定了 udev：
+udev 只在设备事件上触发，而坞失败时**根本没有事件**——内核判失败、把端口 disable 之后就
+不再重试，udev 规则永远不会被调用。oneshot 还天然支持「等一个窗口再判定」「有限次重试」
+「结果进 journal」，并且能用 `systemctl enable/disable` 精确开关。
+
+`systemd/usbdevd-boot-guard.service`（`Type=oneshot`，`After=usbdevd.service`，`WantedBy=multi-user.target`）
+调用 `usbdev_server.py --boot-guard`，流程：
+
+1. **枚举窗口**：等到「开机后 `boot_grace_seconds`（默认 30s）」再判定，窗口从
+   `/proc/uptime` 算而不是从单元启动算，慢开机不会被误判；
+2. **判定**（`boot_guard_decision()` 纯函数，见 `backend/usbdev_core.py`）：
+
+   | 现场 | 结论 |
+   | --- | --- |
+   | `3-1` 存在 | `ok`，不动作 |
+   | 还在窗口内 | `wait`，继续等 |
+   | `3-1` 缺失，端口 `state=not attached` | `skip`：没插坞/坞没上电，不是枚举失败 |
+   | `3-1` 缺失，端口 `state` 读不到 | `skip`：保守不动作 |
+   | `3-1` 缺失，端口 `state` 为其它值（`disabled` 等） | `replug`：判定为枚举失败 |
+   | 已重连次数达到上限（默认 2） | `give_up`：停止，标记失败 |
+
+3. **动作**：只对 `usb3-port1` 写 `disable 1` → 1 秒 → `disable 0`，然后在
+   `boot_settle_seconds`（默认 8s）内观察 `3-1` 是否出现；没出现就再来一次，最多 2 次；
+4. **留痕**：每次自动动作都写一条 `action=boot_auto_replug`、`actor=boot-guard` 的操作历史
+   （含 before/after、耗时、结果），并把本次结论写进 `/var/lib/usbdevd/boot-guard.json`；
+   页面「扩展坞冷启动」卡片显示「坞正常 / 已自动重连成功 / **本次开机自动重连失败**」；
+5. **停止**：达到上限就停手，不会再碰端口；失败只记录、不重启单元。
+
+开关（都在 `/etc/usbdevd/config.json`，改完 `systemctl restart usbdevd` 即可，守卫单元自己读配置）：
+
+```json
+{
+  "auto_replug_on_boot": true,   // 开机自动检查；false = 完全不动作
+  "boot_grace_seconds": 30,      // 枚举窗口（5~300）
+  "boot_replug_attempts": 2,     // 最多重连次数（0~2，0 = 只检查）
+  "boot_settle_seconds": 8,      // 每次重连后观察时长（3~30）
+  "allow_port_replug": false     // 页面手动按钮，与上面互不影响
+}
+```
+
+彻底关掉也可以直接 `systemctl disable usbdevd-boot-guard.service`。
+
+**风险（必须知道）**：这块坞的 USB2 侧下游挂着 **MCHOSE 键盘（`3-1.1`）、罗技接收器（`3-1.4`）、
+RTL8811CU WiFi（`3-1.3`）**，重连 `usb3-port1` 会让它们短暂消失（约 1 秒 + 重新枚举）。
+但触发条件本来就是「坞没枚举成功」——那种状态下这些设备本来就不存在，所以 Net effect 是
+从「全都没反应，等人拔线」变成「自动恢复」。USB 网卡（`4-2.2`）在坞的 USB3 侧，属于另一个
+根口 `usb4-port2`，本守卫**不会**碰它；即使坞整体复位，网卡侧也不在 `usb3-port1` 的管辖范围内，
+但仍然建议在网关模式下留意一次实际表现（首次触发时看一眼 `journalctl -u usbdevd-boot-guard`）。
+
+验证（不依赖冷启动复现）：
+
+```bash
+# 只读演练：读真实 sysfs、给结论、不写 disable、不写历史
+python3 backend/usbdev_server.py --boot-guard --dry-run
+# 看上一次开机的自动检查结论
+python3 backend/usbdev_server.py --guard-status
+```
+
+判据与重试循环在实现时用「伪造 sysfs」验证过：把 `SYSFS_USB` 指向临时目录、`state=disabled`
+且 `3-1` 不存在 → 会重连 2 次后标记 `failed` 并写 2 条历史；随后创建 `3-1` → 判定 `ok` 且
+不再动端口；`--dry-run` 在不存在的场景下返回 `would_replug` 且 `disable` 文件未被修改。
 
 ---
 
@@ -324,8 +393,8 @@ hub 3-1:1.0: 4 ports detected
 sudo ./uninstall-autostart.sh
 ```
 
-- 停止并 disable `usbdevd.service`，删除单元、drop-in 目录、polkit 规则与用户单元
-  `usbdevd-session.service`；
+- 停止并 disable `usbdevd.service` 与 `usbdevd-boot-guard.service`，删除单元、drop-in 目录、
+  polkit 规则与用户单元 `usbdevd-session.service`；
 - 不动 `screen` / `theme_manager` / `usb_wireless_network` 的任何文件；
 - `/var/lib/usbdevd/` 保留（历史记录与快照），需要时手动删；
 - 若曾打开 `allow_port_replug`，回滚前把 `/etc/usbdevd/config.json` 改回 `false` 即可，

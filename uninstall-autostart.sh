@@ -18,6 +18,7 @@ fi
 ACTOR_UID="$(id -u "$ACTOR")"
 ACTOR_HOME="$(getent passwd "$ACTOR" | cut -d: -f6)"
 
+systemctl disable --now usbdevd-boot-guard.service 2>/dev/null || true
 systemctl disable --now usbdevd.service 2>/dev/null || true
 
 if [ -n "$ACTOR_HOME" ] && [ -f "$ACTOR_HOME/.config/systemd/user/usbdevd-session.service" ]; then
@@ -27,10 +28,11 @@ if [ -n "$ACTOR_HOME" ] && [ -f "$ACTOR_HOME/.config/systemd/user/usbdevd-sessio
 fi
 
 rm -f /etc/systemd/system/usbdevd.service
+rm -f /etc/systemd/system/usbdevd-boot-guard.service
 rm -rf /etc/systemd/system/usbdevd.service.d
 rm -f /etc/polkit-1/rules.d/49-usbdevd.rules
 systemctl daemon-reload
 
-echo "已移除 usbdevd.service、drop-in、polkit 规则与用户单元 usbdevd-session.service。"
+echo "已移除 usbdevd.service、usbdevd-boot-guard.service、drop-in、polkit 规则与用户单元 usbdevd-session.service。"
 echo "历史记录仍在 /var/lib/usbdevd/（含 history.jsonl、last-snapshot.json），如需清空手动删除。"
 echo "配置仍在 /etc/usbdevd/config.json。"

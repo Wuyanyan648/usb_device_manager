@@ -1,0 +1,27 @@
+[Unit]
+Description=开机后检查扩展坞枚举，失败时自动端口重连（usb3-port1）
+Documentation=file://@DIR@/README.md
+After=usbdevd.service
+Wants=usbdevd.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=@DIR@
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# 只检查 3-1 是否存在；缺失且端口 state 表明「内核放弃」时，对 usb3-port1 做一次 disable 1→0
+ExecStart=/usr/bin/python3 @DIR@/backend/usbdev_server.py --boot-guard
+# 枚举窗口 30s + 最多 2 次重连（每次 1s + 观察 8s），留足余量
+TimeoutStartSec=180
+# --boot-guard 判定失败时返回 1：结果已写入 /var/lib/usbdevd/boot-guard.json 与操作历史，
+# 不需要把单元标红，避免开机噪音。
+SuccessExitStatus=1
+
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

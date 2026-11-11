@@ -598,6 +598,7 @@ def snapshot():
         },
         "autosuspend": autosuspend_info(devices),
         "dock": dock_info(devices),
+        "boot_guard": read_boot_guard(),
     }
 
 
@@ -957,10 +958,27 @@ PORT_REPLUG_ALLOWLIST = {
     "usb4-port2": "扩展坞 USB3 侧（4-2，GenesysLogic 05e3:0625）",
 }
 CONFIG_PATH = os.environ.get("USBDEVD_CONFIG", "/etc/usbdevd/config.json")
+GUARD_STATE_PATH = os.path.join(STATE_DIR, "boot-guard.json")
+# 开机自动重连的唯一对象：扩展坞 USB2 侧根口 + 它下面应该出现的 hub 节点
+BOOT_GUARD_PORT = "usb3-port1"
+BOOT_GUARD_DOCK = "3-1"
+
+DEFAULT_CONFIG = {
+    # 手动按钮（页面上的「端口重连」）是否可用
+    "allow_port_replug": False,
+    # 开机后自动检查扩展坞并重连（本服务的核心功能，默认开）
+    "auto_replug_on_boot": True,
+    # 从「开机」算起的枚举窗口（秒），窗口内不判定失败
+    "boot_grace_seconds": 30,
+    # 最多自动重连次数（0 = 只检查不动作；上限 2）
+    "boot_replug_attempts": 2,
+    # 每次重连后观察多久（秒）再判定这一轮是否成功
+    "boot_settle_seconds": 8,
+}
 
 
 def load_config():
-    cfg = {"allow_port_replug": False}
+    cfg = dict(DEFAULT_CONFIG)
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -968,6 +986,11 @@ def load_config():
             cfg.update({k: v for k, v in data.items() if k in cfg})
     except (OSError, ValueError):
         pass
+    cfg["allow_port_replug"] = bool(cfg["allow_port_replug"])
+    cfg["auto_replug_on_boot"] = bool(cfg["auto_replug_on_boot"])
+    cfg["boot_grace_seconds"] = max(5, min(300, int(cfg["boot_grace_seconds"])))
+    cfg["boot_replug_attempts"] = max(0, min(2, int(cfg["boot_replug_attempts"])))
+    cfg["boot_settle_seconds"] = max(3, min(30, int(cfg["boot_settle_seconds"])))
     return cfg
 
 
@@ -1030,21 +1053,11 @@ def port_issues(ports, journal_events):
     return issues
 
 
-def port_replug(port_key, confirm="", actor="local-ui", note=""):
-    """端口级「软件拔插」：disable 写 1 → 等 1s → 写 0。
+def _port_cycle(port_key, settle=8.0):
+    """对白名单端口做一次 disable 1→0，并在 settle 秒内观察是否重新出现。
 
-    默认关闭，需要在 config.json 里显式打开 allow_port_replug。
-    只允许扩展坞的两个根口，避免误伤整条总线（usb3 上还有内置键盘/蓝牙）。
+    不做任何策略判断（白名单/开关/确认都在调用方），返回结果字典。
     """
-    cfg = load_config()
-    if not cfg.get("allow_port_replug"):
-        return {"ok": False, "error": "该操作未启用（%s 里 allow_port_replug=false）" % CONFIG_PATH}
-    if port_key not in PORT_REPLUG_ALLOWLIST:
-        return {"ok": False, "error": "不在白名单内，拒绝执行：%s" % port_key}
-    if confirm != port_key:
-        return {"ok": False, "error": "需要二次确认：confirm 必须等于端口名 %s" % port_key,
-                "need_confirm": port_key}
-
     root, pdir = _port_dir(port_key)
     disable = os.path.join(pdir, "disable")
     if not os.path.exists(disable):
@@ -1052,8 +1065,7 @@ def port_replug(port_key, confirm="", actor="local-ui", note=""):
     if not os.access(disable, os.W_OK):
         return {"ok": False, "error": "没有写入权限（需要 root）"}
 
-    before = {k: v for k, v in dock_info().items() if k == "ports"}
-    before_ports = [p for p in before["ports"] if p["key"] == port_key]
+    before_ports = [p for p in dock_info()["ports"] if p["key"] == port_key]
     started = time.time()
     steps = []
     try:
@@ -1067,29 +1079,216 @@ def port_replug(port_key, confirm="", actor="local-ui", note=""):
     except OSError as e:
         return {"ok": False, "error": "写入失败：%s" % e, "steps": steps}
 
-    deadline = time.time() + 8.0
+    deadline = time.time() + settle
     after_port = {}
     while time.time() < deadline:
         time.sleep(0.4)
-        info = dock_info()
-        cur = [p for p in info["ports"] if p["key"] == port_key]
+        cur = [p for p in dock_info()["ports"] if p["key"] == port_key]
         after_port = cur[0] if cur else {}
         if after_port.get("present") and after_port.get("state") in ("configured", "connected"):
             break
 
-    detail = ("端口已重新连接，设备已重新枚举" if after_port.get("present")
-              else "端口已复位，但 8 秒内没有观察到设备重新出现")
+    return {
+        "ok": True,
+        "reappeared": bool(after_port.get("present")),
+        "steps": steps,
+        "before": before_ports,
+        "after": after_port,
+        "elapsed_ms": int((time.time() - started) * 1000),
+        "detail": ("端口已重新连接，设备已重新枚举" if after_port.get("present")
+                   else "端口已复位，但 %d 秒内没有观察到设备重新出现" % int(settle)),
+    }
+
+
+def port_replug(port_key, confirm="", actor="local-ui", note=""):
+    """端口级「软件拔插」：disable 写 1 → 等 1s → 写 0（页面手动按钮走这里）。
+
+    默认关闭，需要在 config.json 里显式打开 allow_port_replug。
+    只允许扩展坞的两个根口，避免误伤整条总线（usb3 上还有内置键盘/蓝牙）。
+    """
+    cfg = load_config()
+    if not cfg.get("allow_port_replug"):
+        return {"ok": False, "error": "该操作未启用（%s 里 allow_port_replug=false）" % CONFIG_PATH}
+    if port_key not in PORT_REPLUG_ALLOWLIST:
+        return {"ok": False, "error": "不在白名单内，拒绝执行：%s" % port_key}
+    if confirm != port_key:
+        return {"ok": False, "error": "需要二次确认：confirm 必须等于端口名 %s" % port_key,
+                "need_confirm": port_key}
+
+    res = _port_cycle(port_key, cfg["boot_settle_seconds"])
+    if not res.get("ok"):
+        return res
     entry = {
         "ts": _iso_now(), "epoch": time.time(), "action": "port_replug", "ok": True,
         "path": port_key, "vidpid": "", "product": PORT_REPLUG_ALLOWLIST[port_key],
         "level": "critical", "actor": actor or "local-ui", "note": note or "",
-        "detail": detail, "before": before_ports, "after": after_port,
-        "elapsed_ms": int((time.time() - started) * 1000),
+        "detail": res["detail"], "before": res["before"], "after": res["after"],
+        "elapsed_ms": res["elapsed_ms"],
     }
     _append_history(entry)
-    return {"ok": True, "action": "port_replug", "path": port_key, "detail": detail,
-            "steps": steps, "before": before_ports, "after": after_port,
+    return {"ok": True, "action": "port_replug", "path": port_key, "detail": res["detail"],
+            "steps": res["steps"], "before": res["before"], "after": res["after"],
             "history": entry}
+
+
+# ---------------------------------------------------------------------------
+# 开机自动重连（扩展坞冷启动问题）
+#
+# 触发方式选 systemd oneshot 而不是 udev 规则：udev 只在「设备事件」上触发，
+# 而这里要修的恰恰是「没有事件」——hub 本体在开机时被内核判失败、端口被
+# disable 后就再也不发 connect，udev 规则永远不会被触发。oneshot 还能天然
+# 支持「等一个枚举窗口再判定」「失败重试 N 次」「结果进 journal」。
+# ---------------------------------------------------------------------------
+
+# 端口 state 的取值来自 /sys/bus/usb/devices/usbX/X-0:1.0/usbX-portN/state：
+#   not attached → 口上没东西（没插坞，或坞彻底掉电）
+#   disabled     → 内核枚举失败后主动禁用该口（本服务要修的那种）
+#   configured   → 已枚举并配置（正常）
+def boot_guard_decision(hub_present, port_state, uptime, cfg, attempts_done):
+    """纯函数：给定现场输入，返回该做什么。不读文件、不写文件，便于单测。
+
+    返回 {"verdict": wait|ok|skip|replug|give_up, "reason": str}
+    """
+    if not cfg.get("auto_replug_on_boot"):
+        return {"verdict": "skip", "reason": "开机自动重连已在 %s 里关闭（auto_replug_on_boot=false）" % CONFIG_PATH}
+    if uptime < cfg["boot_grace_seconds"]:
+        return {"verdict": "wait",
+                "reason": "还在枚举窗口内（开机 %.0fs < %ds）" % (uptime, cfg["boot_grace_seconds"])}
+    if hub_present:
+        return {"verdict": "ok", "reason": "扩展坞 %s 已枚举，不需要干预" % BOOT_GUARD_DOCK}
+    if port_state in ("", None):
+        return {"verdict": "skip", "reason": "读不到 %s 的 state，保守起见不动作" % BOOT_GUARD_PORT}
+    if port_state == "not attached":
+        return {"verdict": "skip",
+                "reason": "端口 %s 上没有设备（未接坞/坞未上电），不重连" % BOOT_GUARD_PORT}
+    if attempts_done >= cfg["boot_replug_attempts"]:
+        return {"verdict": "give_up",
+                "reason": "坞仍未出现，已重连 %d 次，停止重试" % attempts_done}
+    return {"verdict": "replug",
+            "reason": "坞 %s 缺失，端口 state=%s，判定为枚举失败" % (BOOT_GUARD_DOCK, port_state)}
+
+
+def _uptime():
+    try:
+        with open("/proc/uptime", "r") as f:
+            return float(f.read().split()[0])
+    except (OSError, ValueError):
+        return 0.0
+
+
+def read_boot_guard():
+    """读上一次开机自动检查的结果（页面用）。"""
+    try:
+        with open(GUARD_STATE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data["current_boot"] = data.get("boot_id") == _boot_id()
+            return data
+    except (OSError, ValueError):
+        pass
+    return {"current_boot": False, "result": "unknown", "attempts": [],
+            "note": "本次开机还没有跑过自动检查"}
+
+
+def _write_boot_guard(state):
+    _ensure_state_dir()
+    tmp = GUARD_STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, GUARD_STATE_PATH)
+
+
+def run_boot_guard(dry_run=False):
+    """开机检查一次扩展坞，必要时自动做端口重连。返回结果字典。
+
+    只看 BOOT_GUARD_DOCK / BOOT_GUARD_PORT 这一对固定对象，不扫描其它端口。
+    """
+    cfg = load_config()
+    started = time.time()
+    hub_path = os.path.join(SYSFS_USB, BOOT_GUARD_DOCK)
+    root, pdir = _port_dir(BOOT_GUARD_PORT)
+    state_path = os.path.join(pdir, "state")
+
+    state = {
+        "boot_id": _boot_id(), "started": _iso_now(), "dry_run": bool(dry_run),
+        "port": BOOT_GUARD_PORT, "dock": BOOT_GUARD_DOCK,
+        "config_path": CONFIG_PATH,
+        "enabled": bool(cfg["auto_replug_on_boot"]),
+        "grace_seconds": cfg["boot_grace_seconds"],
+        "max_attempts": cfg["boot_replug_attempts"],
+        "attempts": [], "result": "unknown", "reason": "", "error": "",
+    }
+
+    # 枚举窗口：从「开机」算，而不是从本单元启动算，避免慢开机被误判
+    wait_s = cfg["boot_grace_seconds"] - _uptime()
+    if wait_s > 0 and not dry_run:
+        time.sleep(min(wait_s, cfg["boot_grace_seconds"]))
+
+    attempts_done = 0
+    while True:
+        uptime = _uptime()
+        hub_present = os.path.isdir(hub_path)
+        port_state = _read(state_path)
+        state["uptime"] = round(uptime, 1)
+        state["port_state"] = port_state
+        state["hub_present"] = hub_present
+
+        d = boot_guard_decision(hub_present, port_state, uptime, cfg, attempts_done)
+        state["reason"] = d["reason"]
+
+        if d["verdict"] == "wait":
+            if dry_run:
+                state["result"] = "skipped"
+                break
+            time.sleep(min(cfg["boot_grace_seconds"] - uptime, 2.0) or 0.5)
+            continue
+        if d["verdict"] == "ok":
+            state["result"] = "ok" if attempts_done == 0 else "fixed"
+            break
+        if d["verdict"] in ("skip", "give_up"):
+            state["result"] = ("failed" if d["verdict"] == "give_up"
+                               else ("disabled" if not cfg["auto_replug_on_boot"] else "skipped"))
+            break
+
+        # verdict == replug
+        if dry_run:
+            state["result"] = "would_replug"
+            break
+        attempts_done += 1
+        res = _port_cycle(BOOT_GUARD_PORT, cfg["boot_settle_seconds"])
+        attempt = {
+            "ts": _iso_now(), "attempt": attempts_done, "action": "disable 1→0",
+            "ok": bool(res.get("ok")), "reappeared": bool(res.get("reappeared")),
+            "detail": res.get("detail") or res.get("error", ""),
+            "before": res.get("before", []), "after": res.get("after", []),
+            "elapsed_ms": res.get("elapsed_ms"),
+        }
+        state["attempts"].append(attempt)
+        # 每一次自动动作都进操作历史，成功失败都留痕
+        _append_history({
+            "ts": attempt["ts"], "epoch": time.time(), "action": "boot_auto_replug",
+            "ok": attempt["ok"], "path": BOOT_GUARD_PORT, "vidpid": "",
+            "product": PORT_REPLUG_ALLOWLIST.get(BOOT_GUARD_PORT, ""),
+            "level": "critical", "actor": "boot-guard",
+            "note": "开机自动检查：扩展坞 %s 未枚举（第 %d 次）" % (BOOT_GUARD_DOCK, attempts_done),
+            "detail": attempt["detail"], "before": attempt["before"],
+            "after": attempt["after"], "elapsed_ms": attempt["elapsed_ms"],
+        })
+        if not attempt["ok"]:
+            state["result"] = "failed"
+            state["error"] = res.get("error", "")
+            break
+        if attempt["reappeared"]:
+            state["result"] = "fixed"
+            break
+        # 没起来：进入下一轮判定（由 max_attempts 控制是否还有额度）
+        continue
+
+    state["elapsed_ms"] = int((time.time() - started) * 1000)
+    state["finished"] = _iso_now()
+    if not dry_run:
+        _write_boot_guard(state)
+    return state
 
 
 if __name__ == "__main__":

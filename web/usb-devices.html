@@ -395,7 +395,32 @@ function renderDock() {
   const ports = d.ports || [];
   const failed = (STATE.journal || []).filter(e => e.kind === "enum_fail");
   const hasFailure = failed.length > 0;
-  $("#dockCard").style.display = hasFailure || ports.some(p => !p.present) ? "" : "none";
+  const g = STATE.boot_guard || {};
+  const gResult = g.current_boot ? (g.result || "unknown") : "unknown";
+  const guardBadge = {
+    ok: '<span class="badge b-ok">坞正常，未干预</span>',
+    fixed: '<span class="badge b-warn">坞未枚举，已自动重连成功</span>',
+    failed: '<span class="badge b-bad">本次开机自动重连失败</span>',
+    skipped: '<span class="badge">未触发</span>',
+    disabled: '<span class="badge">已关闭</span>',
+    would_replug: '<span class="badge b-warn">演练：会重连（未写入）</span>',
+    unknown: '<span class="badge">本次开机未跑过检查</span>'
+  }[gResult] || '<span class="badge">未知</span>';
+  const guardAttempts = (g.attempts || []).map(a => `
+    <div class="small">第 ${a.attempt} 次 · ${esc(a.ts)} · disable 1→0 ·
+      ${a.reappeared ? "坞已出现" : "坞仍缺失"} · ${esc(a.detail || "")}</div>`).join("");
+  const guardBox = `<div class="warnbox" style="margin-bottom:10px">
+      开机自动检查：${guardBadge}
+      <span class="small">（${g.enabled === false ? "已在配置里关闭" : "已开启"}
+        · 窗口 ${g.grace_seconds ?? "-"}s · 最多 ${g.max_attempts ?? "-"} 次
+        · ${esc(g.reason || g.note || "")}）</span>
+      ${guardAttempts}
+      ${gResult === "failed" ? `<div class="small" style="margin-top:6px">
+        <b>本次开机自动重连失败</b>：坞 ${esc(g.dock || "3-1")} 仍未出现，已停止重试，不再反复动端口。
+        请检查坞的供电/线缆，或手动点下面的「端口重连」。</div>` : ""}
+    </div>`;
+  $("#dockCard").style.display = (hasFailure || gResult === "failed" || gResult === "fixed"
+    || ports.some(p => !p.present)) ? "" : "none";
   const rows = ports.map(p => `
     <tr>
       <td><code>${esc(p.key)}</code> <span class="small">${esc(p.label)}</span></td>
@@ -415,12 +440,14 @@ function renderDock() {
     : `<div class="small" style="margin-top:8px">端口重连默认关闭。要启用：在 <code>${esc(d.config_path)}</code> 写入
        <code>{"allow_port_replug": true}</code> 后重启服务。依据：hub 没枚举出来时没有 sysfs 节点，
        <code>authorized</code> 无对象可写，只能靠端口 disable 触发一次真正的端口复位。</div>`;
-  $("#dockBody").innerHTML = `
+  $("#dockBody").innerHTML = `${guardBox}
     <div style="overflow:auto"><table class="tbl">
       <thead><tr><th>端口</th><th>连接</th><th>state</th><th>当前设备</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>${hint}
     <div class="small" style="margin-top:10px">
       最近三次启动里共有 <b>${failed.length}</b> 条枚举失败记录${hasFailure ? "，最近一条：" + esc(failed[failed.length - 1].ts) + " " + esc(failed[failed.length - 1].path) : ""}。
+      重连瞬间会短暂断开挂在坞上的键盘/鼠标接收器/WiFi（约 1 秒 + 重新枚举），
+      但那种情况下它们本来就已经不可用。关闭自动检查：<code>auto_replug_on_boot=false</code>。
     </div>`;
   document.querySelectorAll("[data-replug]").forEach(b => b.onclick = () => confirmReplug(b.dataset.replug));
 }
@@ -502,12 +529,14 @@ function renderBuses() {
 
 function renderHistory() {
   const ops = (STATE.history && STATE.history.entries) || [];
+  const actionLabel = { link_off: "关闭链路", link_on: "打开链路",
+                        port_replug: "端口重连", boot_auto_replug: "开机自动重连" };
   $("#opsList").innerHTML = ops.length ? ops.map(e => `
     <div class="ev">
       <span class="t">${esc(shortTs(e.ts))}</span>
       <span>${e.ok ? '<span class="badge b-ok">成功</span>' : '<span class="badge b-bad">失败</span>'}</span>
       <span class="p">${esc(e.path)}</span>
-      <span class="d">${esc(e.action)} · ${esc(e.detail || "")}${e.note ? " · " + esc(e.note) : ""} · by ${esc(e.actor || "-")}</span>
+      <span class="d">${esc(actionLabel[e.action] || e.action)} · ${esc(e.detail || "")}${e.note ? " · " + esc(e.note) : ""} · by ${esc(e.actor || "-")}</span>
     </div>`).join("") : '<div class="empty">还没有操作记录</div>';
 
   const kern = STATE.journal || [];
