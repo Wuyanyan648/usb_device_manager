@@ -1302,14 +1302,56 @@ def _uptime():
         return 0.0
 
 
+def _dock_recovered_at():
+    """坞「后来才出现」的时刻：取坞节点 mtime 里最早的一个。
+
+    sysfs 目录的 mtime 就是内核创建该设备节点的时刻，等价于枚举完成时间，
+    不需要为它额外落盘。
+    """
+    targets = [os.path.join(SYSFS_USB, BOOT_GUARD_DOCK)]
+    for key in PORT_REPLUG_ALLOWLIST:
+        _, pdir = _port_dir(key)
+        targets.append(os.path.join(pdir, "device"))
+    stamps = []
+    for path in targets:
+        try:
+            stamps.append(os.stat(path).st_mtime)
+        except OSError:
+            continue
+    if not stamps:
+        return ""
+    return time.strftime("%H:%M:%S", time.localtime(min(stamps)))
+
+
+def overlay_boot_guard(state, hub_present, recovered_at=""):
+    """把「判定失败、后来坞自己出现了」叠加到落盘结果上（纯函数，便于单测）。
+
+    只改展示用的结论，不动 attempts，也不触发任何重连动作。
+    """
+    data = dict(state or {})
+    data["hub_present"] = bool(hub_present)
+    if data.get("result") == "failed" and hub_present:
+        data["result"] = "recovered"
+        data["recovered_at"] = recovered_at
+        data["reason"] = ("开机时坞 %s 未枚举，已于 %s 自行恢复，无需干预"
+                          % (BOOT_GUARD_DOCK, recovered_at or "之后"))
+        data["note"] = data["reason"]
+    return data
+
+
 def read_boot_guard():
-    """读上一次开机自动检查的结果（页面用）。"""
+    """读上一次开机自动检查的结果（页面用）。
+
+    落盘的是「判定那一刻」的快照，而坞可能在判定之后才枚举成功。这里每次读取
+    都叠加一次当前状态，避免页面长期挂着「仍未出现」的红字、下面却写着「已连接」。
+    """
     try:
         with open(GUARD_STATE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             data["current_boot"] = data.get("boot_id") == _boot_id()
-            return data
+            hub_present = os.path.isdir(os.path.join(SYSFS_USB, BOOT_GUARD_DOCK))
+            return overlay_boot_guard(data, hub_present, _dock_recovered_at())
     except (OSError, ValueError):
         pass
     return {"current_boot": False, "result": "unknown", "attempts": [],

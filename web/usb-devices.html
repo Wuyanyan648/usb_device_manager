@@ -483,12 +483,13 @@ function render() {
   $("#asPill").textContent = "usbcore.autosuspend=" + (h.usbcore_autosuspend || "?");
   const bg = s.boot_guard || {};
   const bgText = !bg.current_boot ? "本次开机未检查"
-    : ({ ok: "坞正常", fixed: "已自动修复", failed: "自动重连失败",
+    : ({ ok: "坞正常", fixed: "已自动修复", recovered: "已自行恢复", failed: "自动重连失败",
          skipped: "未触发", disabled: "已关闭", would_replug: "演练",
          unknown: "未检查" }[bg.result] || bg.result);
   $("#guardPill").textContent = "开机守卫 " + (bg.enabled === false ? "关 · " : "开 · ") + bgText;
   $("#guardPill").style.color = bg.result === "failed" ? "var(--red)"
-    : (bg.result === "fixed" ? "var(--yellow)" : "");
+    : (bg.result === "recovered" ? "var(--green)"
+    : (bg.result === "fixed" ? "var(--yellow)" : ""));
   $("#authNote").textContent = s.capabilities.root ? "root 运行，可开关链路" : "只读：非 root";
 
   const c = s.counts || {};
@@ -520,6 +521,7 @@ function renderDock() {
   const guardBadge = {
     ok: '<span class="badge b-ok">坞正常，未干预</span>',
     fixed: '<span class="badge b-warn">坞未枚举，已自动重连成功</span>',
+    recovered: '<span class="badge b-ok">开机时缺失，已自行恢复</span>',
     failed: '<span class="badge b-bad">本次开机自动重连失败</span>',
     skipped: '<span class="badge">未触发</span>',
     disabled: '<span class="badge">已关闭</span>',
