@@ -218,6 +218,14 @@
   .legend i.amber { background: var(--yellow); }
   .legend i.red { background: var(--red); }
   .tree-graph { padding: 6px 18px 18px; }
+  .phys-map { padding: 4px 14px 18px; overflow-x: auto; overflow-y: hidden; }
+  .phys-map svg { display: block; }
+  .phys-node { cursor: default; }
+  .phys-node:hover rect:first-of-type { stroke: var(--accent); }
+  .phys-node.off { opacity: .55; }
+  .phys-node.bad rect:first-of-type { stroke: var(--yellow); stroke-dasharray: 3 3; }
+  .phys-node.ghost { opacity: .85; }
+  .phys-empty { padding: 28px 20px; color: var(--muted); }
   .tnode { position: relative; }
   .tchildren { margin-left: 18px; padding-left: 16px; border-left: 1px dashed var(--border-soft); }
   .tchildren > .tnode > .trow::before {
@@ -322,6 +330,26 @@
     <div class="card-body" id="issueBody"></div>
   </section>
 
+  <!-- 实物拓扑 -->
+  <section class="card" id="physCard">
+    <div class="card-head">
+      <h2>实物拓扑</h2>
+      <span class="hint">按 sysfs 真实层级画：控制器 → 根口 → hub → 子设备，线缆上标端口号、节点角上标速率</span>
+      <div class="spacer"></div>
+      <span class="pill" id="physSummary"></span>
+    </div>
+    <div class="card-body flush">
+      <div class="legend">
+        <span><i></i>在线设备</span>
+        <span><i class="sq"></i>Hub（带下游）</span>
+        <span><i class="ring"></i>链路已关闭 authorized=0</span>
+        <span><i class="amber"></i>状态异常</span>
+        <span><i class="red"></i>缺失 / 未识别（虚线）</span>
+      </div>
+      <div id="physMap" class="phys-map"></div>
+    </div>
+  </section>
+
   <!-- 拓扑 -->
   <section class="card">
     <div class="card-head">
@@ -424,6 +452,7 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="usb-type-map.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -504,10 +533,40 @@ function render() {
 
   renderDock();
   renderIssues();
+  renderPhysMap();
   renderTopo();     // 图先渲染，renderTree 末尾统一给两边的链路开关绑事件
   renderTree();
   renderBuses();
   renderHistory();
+}
+
+function renderPhysMap() {
+  const host = $("#physMap");
+  if (!host || !window.USBPhysMap) return;
+  const ghosts = [];
+  ((STATE.dock && STATE.dock.ports) || []).forEach((p) => {
+    if (p.present) return;
+    // 端口在，但设备没枚举出来：画成虚线幽灵，别让它看起来还插着
+    if (p.device) {
+      ghosts.push({ path: p.device, name: "扩展坞未识别" });
+      return;
+    }
+    const m = String(p.key || "").match(/^usb(\d+)-port(\d+)$/);
+    if (m && ["default", "disabled", "reconnecting"].includes(p.state)) {
+      ghosts.push({ path: `${m[1]}-${m[2]}`, name: "端口无设备" });
+    }
+  });
+  const diff = STATE.boot_diff || {};
+  const out = USBPhysMap.render(host, STATE.rows || [], {
+    missing: diff.missing || [],
+    ghosts,
+  });
+  const c = STATE.counts || {};
+  const nodes = (window.__physMapReport || { nodes: [] }).nodes || [];
+  const devs = nodes.filter((n) => n.type !== "host" && n.type !== "controller").length;
+  const empty = Math.max(0, (c.ports_total || 0) - (c.ports_occupied || 0));
+  $("#physSummary").textContent = `${nodes.filter((n) => n.type === "controller").length} 条总线 · ${devs} 个设备 · ${empty} 个空口`
+    + (out && out.size ? ` · ${out.size.width}×${out.size.height}` : "");
 }
 
 function renderDock() {
